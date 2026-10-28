@@ -1,0 +1,47 @@
+.react-flow__node-agent:has(.canvas-agent-node:hover), .react-flow__node-agent:has(.canvas-agent-node:focus-within) { z-index:100 !important; }
+.canvas-agent-node { position:relative; width:96px; height:96px; color:#f5f5f5; animation:canvas-agent-appear 260ms cubic-bezier(.2,.8,.2,1); }
+.canvas-agent-open { position:relative; display:grid; place-items:center; width:100%; height:100%; padding:8px; border:0; border-radius:28px; background:transparent; cursor:grab; touch-action:none; }
+.canvas-agent-open:active { cursor:grabbing; }
+.canvas-agent-open:focus-visible { outline:1px solid #c2b9ef; outline-offset:3px; }
+.canvas-agent-node[data-working] .canvas-agent-face i::after { opacity:1; background:linear-gradient(270deg,#6ee7b7,#67e8f9,#a5b4fc,#f0abfc,#fda4af,#fcd34d,#6ee7b7); background-size:400% 100%; animation:canvas-agent-aurora 6s ease infinite; }
+.canvas-agent-node[data-working] .canvas-agent-avatar { animation:canvas-agent-attentive 4.8s ease-in-out infinite; }
+.canvas-agent-node[data-working] .canvas-agent-face { animation:canvas-agent-look 4.8s ease-in-out infinite; }
+.canvas-agent-ideas { position:absolute; inset:0; pointer-events:none; }
+.canvas-agent-idea { position:absolute; left:50%; top:45%; width:var(--idea-size); height:var(--idea-size); color:#c0c0c9; opacity:0; animation:canvas-agent-idea-drift 10.4s var(--idea-delay) linear infinite,canvas-agent-idea-fade 10.4s var(--idea-delay) linear infinite; }
+.canvas-agent-idea svg { display:block; width:100%; height:100%; }
+.canvas-agent-node[data-dragging] .canvas-agent-avatar { animation:none; transform:rotate(7deg) scale(1.03); }
+.canvas-agent-process { position:absolute; z-index:2; left:-97px; top:calc(100% + 12px); width:290px; padding:12px 16px 16px; border:1px solid #3b3b40; border-radius:18px; background:#202022f7; box-shadow:0 12px 36px #0004; cursor:default; opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-6px) scale(.98); transform-origin:var(--agent-card-arrow-x,145px) top; transition:opacity 140ms ease,transform 180ms cubic-bezier(.2,.8,.2,1),visibility 140ms; }
+.canvas-agent-process::before { content:""; position:absolute; top:-14px; left:0; right:0; height:16px; }
+.canvas-agent-process::after { content:""; position:absolute; left:calc(var(--agent-card-arrow-x,145px) - 4px); top:-5px; width:8px; height:8px; border-left:1px solid #3b3b40; border-top:1px solid #3b3b40; background:#202022; transform:rotate(45deg); }
+.canvas-agent-node[data-above] .canvas-agent-process { top:auto; bottom:calc(100% + 12px); transform:translateY(6px) scale(.98); transform-origin:var(--agent-card-arrow-x,145px) bottom; }
+.canvas-agent-node[data-above] .canvas-agent-process::before { top:auto; bottom:-14px; }
+.canvas-agent-node[data-above] .canvas-agent-process::after { top:auto; bottom:-5px; border:0; border-right:1px solid #3b3b40; border-bottom:1px solid #3b3b40; }
+.canvas-agent-node:is(:hover,:focus-within):not([data-dismissed]):not([data-dragging]) .canvas-agent-process { opacity:1; visibility:visible; pointer-events:auto; transform:none; }
+.canvas-agent-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.canvas-agent-actions { display:flex; align-items:center; flex:0 0 auto; gap:3px; }
+.canvas-agent-actions button { display:grid; place-items:center; width:25px; height:25px; padding:0; border:0; border-radius:6px; background:transparent; color:#b5b2bf; cursor:pointer; }
+.canvas-agent-actions button:hover { background:#343438; color:#f5f5f5; }
+.canvas-agent-actions button:focus-visible { outline:1px solid #c2b9ef; outline-offset:2px; }
+.canvas-agent-title { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:18px; font-weight:550; }
+.canvas-agent-preview { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; overflow-wrap:anywhere; margin:7px 0 0; color:#b4b4bc; font-size:12px; line-height:18px; }
+.canvas-agent-activity { display:flex; flex-direction:column; gap:11px; list-style:none; margin:14px 0 0; padding:13px 0 0; border-top:1px solid #37373c; }
+.canvas-agent-activity li { display:flex; align-items:flex-start; gap:9px; color:#a3a3ac; font-size:11px; line-height:16px; }
+.canvas-agent-activity li > svg { flex-shrink:0; margin-top:1px; color:#888893; }
+.canvas-agent-activity li > span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; overflow-wrap:anywhere; }
+.canvas-agent-activity li[data-status=running] { color:#e2ddee; }
+.canvas-agent-activity li[data-status=running] > svg { color:#c2b9ef; }
+.canvas-agent-activity li[data-status=failed] > svg { color:#e1a1a1; }
+.canvas-agent-activity small { display:block; margin-top:2px; color:#82828c; font-size:10px; line-height:15px; }
+.canvas-agent-spinner { animation:canvas-agent-spin 1.5s linear infinite; }
+@keyframes canvas-agent-appear { from { opacity:0; transform:translateY(10px) scale(.8); } to { opacity:1; transform:none; } }
+@keyframes canvas-agent-attentive { 0%,100% { transform:rotate(-3deg); } 22%,37% { transform:translate(-2px,-3px) rotate(-7deg); } 53% { transform:translateY(0) scale(1.015,.985); } 70%,82% { transform:translate(2px,-3px) rotate(4deg); } }
+@keyframes canvas-agent-look { 0%,100% { translate:0 0; } 22%,37% { translate:-2px -2px; } 70%,82% { translate:2px -1px; } }
+@keyframes canvas-agent-aurora { 0%,100% { background-position:0% 50%; } 50% { background-position:100% 50%; } }
+/* Separate linear travel from fading so opacity keyframes cannot cause a mid-flight pause. */
+@keyframes canvas-agent-idea-drift { 0% { transform:translate(var(--idea-x),var(--idea-y)) scale(.9) rotate(calc(var(--idea-tilt) * -.4)); } 12.5%,100% { transform:translate(var(--idea-end-x),var(--idea-end-y)) scale(.9) rotate(calc(var(--idea-tilt) * .4)); } }
+@keyframes canvas-agent-idea-fade { 0% { opacity:0; } 3% { opacity:.75; } 7% { opacity:.6; } 12.5%,100% { opacity:0; } }
+@keyframes canvas-agent-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) {
+  .canvas-agent-node, .canvas-agent-node *, .canvas-agent-node *::before, .canvas-agent-node *::after { animation:none !important; transition:none !important; }
+  .canvas-agent-idea:first-child { opacity:.6; transform:translate(-50px,-58px); }
+}
