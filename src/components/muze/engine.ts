@@ -1,6 +1,8 @@
 import { ActiveSelection, Canvas, Ellipse, FabricImage, FabricObject, Group, IText, Line, PencilBrush, Point, Polygon, Rect, Textbox, Triangle, util, type TPointerEvent, type TMat2D } from 'fabric';
 import { MuzeArrow, MuzeNote, MuzeText, MuzeLabel, type Arrowhead } from './objects';
 import { MuzeShape, type Geo } from './shapes';
+import { GRID_STEP } from './grid';
+import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
 import { FONTS, SIZES, loadFonts, pale, svgFonts } from './styles';
 import { download, filename, parseObjects, type Drawing } from './storage';
 
@@ -132,10 +134,12 @@ export class WhiteboardEngine {
     };
     await this.canvas.loadFromJSON({ objects: drawing.objects.map(migrate) });
     if (this.closed) return;
-    this.canvas.setViewportTransform(drawing.viewport as TMat2D);
+    const viewport = clampViewport(drawing.viewport, this.canvas.width, this.canvas.height);
+    this.canvas.setViewportTransform(viewport);
     this.canvas.getObjects().forEach(object => { object.id ||= crypto.randomUUID(); this.configure(object); });
     this.syncLabels(); this.rememberFrames();
     this.history = [this.snapshot()]; this.future = []; this.loading = false; this.setTool('select'); this.canvas.requestRenderAll(); this.emit();
+    if (viewport[0] !== drawing.viewport[0]) this.changed({ objects: drawing.objects, viewport });
   }
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
   setDark(value: boolean) { this.dark = value; this.syncLabels(); this.canvas.requestRenderAll(); }
@@ -433,14 +437,14 @@ export class WhiteboardEngine {
     selected.forEach((o, i) => { const b = boxes[i]; const x = axis === 'left' ? left : axis === 'right' ? right - b.width : axis === 'center' ? (left + right - b.width) / 2 : b.left; const y = axis === 'top' ? top : axis === 'bottom' ? bottom - b.height : axis === 'middle' ? (top + bottom - b.height) / 2 : b.top; o.set({ left: o.left + x - b.left, top: o.top + y - b.top }); o.setCoords(); });
     this.canvas.setActiveObject(new ActiveSelection(selected, { canvas: this.canvas })); this.syncLabels(); this.connectors(); this.checkpoint();
   }
-  zoom(value: number, point = new Point(this.canvas.width / 2, this.canvas.height / 2)) { this.canvas.zoomToPoint(point, Math.max(.1, Math.min(8, value))); this.publish(); }
+  zoom(value: number, point = new Point(this.canvas.width / 2, this.canvas.height / 2)) { this.canvas.zoomToPoint(point, clampZoom(value)); this.publish(); }
   fit(selection = false) {
     const objects = selection ? this.canvas.getActiveObjects() : this.canvas.getObjects();
     if (!objects.length) { if (!selection) this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); this.publish(); return; }
     const boxes = objects.map(o => o.getBoundingRect());
     const left = Math.min(...boxes.map(b => b.left)), top = Math.min(...boxes.map(b => b.top)), right = Math.max(...boxes.map(b => b.left + b.width)), bottom = Math.max(...boxes.map(b => b.top + b.height));
     const margin = this.canvas.width < 700 ? 60 : 240;
-    const zoom = Math.max(.1, Math.min(selection ? 4 : 1, (this.canvas.width - margin) / Math.max(1, right - left), (this.canvas.height - 200) / Math.max(1, bottom - top)));
+    const zoom = clampZoom(Math.min(selection ? MAX_ZOOM : 1, (this.canvas.width - margin) / Math.max(1, right - left), (this.canvas.height - 200) / Math.max(1, bottom - top)));
     this.canvas.setViewportTransform([zoom, 0, 0, zoom, (this.canvas.width - (this.canvas.width < 700 ? 0 : 140)) / 2 - (left + right) / 2 * zoom, (this.canvas.height - 60) / 2 - (top + bottom) / 2 * zoom]); this.publish();
   }
   panTo(point: Point) { const v = [...this.canvas.viewportTransform] as TMat2D; v[4] = this.canvas.width / 2 - point.x * v[0]; v[5] = this.canvas.height / 2 - point.y * v[0]; this.canvas.setViewportTransform(v); this.publish(); }
@@ -485,7 +489,7 @@ export class WhiteboardEngine {
   private snapObject(object: FabricObject, event: PointerEvent) {
     object.setCoords(); this.guides = [];
     if (object.labelFor || !(this.snap || event.ctrlKey || event.metaKey || this.grid)) return;
-    if (this.grid) { object.set({ left: Math.round(object.left / 20) * 20, top: Math.round(object.top / 20) * 20 }); object.setCoords(); }
+    if (this.grid) { object.set({ left: Math.round(object.left / GRID_STEP) * GRID_STEP, top: Math.round(object.top / GRID_STEP) * GRID_STEP }); object.setCoords(); }
     const b = object.getBoundingRect(), threshold = 6 / this.canvas.getZoom();
     const xs = [b.left, b.left + b.width / 2, b.left + b.width], ys = [b.top, b.top + b.height / 2, b.top + b.height];
     let dx = threshold, dy = threshold;
@@ -518,7 +522,7 @@ export class WhiteboardEngine {
       if (!this.touchPoints.has(event.pointerId)) return;
       this.touchPoints.set(event.pointerId, new Point(event.clientX, event.clientY));
       if (!this.pinch || this.touchPoints.size < 2) return;
-      const { center, distance } = midpoint(), zoom = Math.max(.1, Math.min(8, this.pinch.zoom * distance / Math.max(1, this.pinch.distance)));
+      const { center, distance } = midpoint(), zoom = clampZoom(this.pinch.zoom * distance / Math.max(1, this.pinch.distance));
       this.canvas.setViewportTransform([zoom, 0, 0, zoom, center.x - this.pinch.world.x * zoom, center.y - this.pinch.world.y * zoom]);
       this.emit(); event.preventDefault(); event.stopImmediatePropagation();
     };

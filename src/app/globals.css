@@ -1,7 +1,7 @@
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 *{box-sizing:border-box}
 .muze-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;color:#202124;background:#f9fafb}
-.muze-loading span{font-size:24px;font-weight:750;letter-spacing:-1px}
-.muze-loading i{height:3px;width:34px;background:#2f80ed;border-radius:3px;animation:muze-load 1s ease-in-out infinite alternate}
+.muze-loading span{font-size:24px;font-weight:650;letter-spacing:-.6px}
+.muze-loading i{height:3px;width:34px;background:#2e70d6;border-radius:3px;animation:muze-load 1s ease-in-out infinite alternate}
 @keyframes muze-load{to{opacity:.2;transform:scaleX(.5)}}
 @media(prefers-reduced-motion:reduce){.muze-loading i{animation:none}}

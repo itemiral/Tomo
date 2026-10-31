@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 
 const Whiteboard = dynamic(() => import('./editor'), {
   ssr: false,
-  loading: () => <main className="muze-loading" aria-label="Opening your whiteboard"><span>Muze</span><i/></main>,
+  loading: () => <main className="muze-loading" aria-label="Opening your whiteboard"><span>Muse Board</span><i/></main>,
 });
 
 export function MuzeWorkspace() {

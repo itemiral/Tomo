@@ -68,7 +68,7 @@ export function parseObjects(value: unknown): Record<string, unknown>[] {
 }
 export function parseBoardFile(text: string): Board {
   const value: unknown = JSON.parse(text);
-  if (!record(value) || value.format !== 'muze' || value.version !== 1 || !record(value.board)) throw new Error('Choose a valid Muze board file.');
+  if (!record(value) || value.format !== 'muze' || value.version !== 1 || !record(value.board)) throw new Error('Choose a valid Muse Board file.');
   const board = value.board;
   if (typeof board.name !== 'string' || !Array.isArray(board.pages) || !board.pages.length || board.pages.length > 100) throw new Error('This board file is incomplete.');
   const ids = new Set<string>();
