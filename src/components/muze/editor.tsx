@@ -11,6 +11,8 @@ import { gridPattern } from './grid';
 import { MIN_ZOOM, MAX_ZOOM } from './zoom';
 import { createSaveFeedback } from './save-feedback';
 import './whiteboard.css';
+import { MuseCompanion } from '../muse/companion';
+import { boardContext as makeBoardContext } from '@/lib/muse-board';
 
 const TOOLS: Record<Tool, { name: string; icon: typeof MousePointer2; key: string; hint: string }> = {
   select: { name: 'Select', icon: MousePointer2, key: 'V', hint: 'Move, resize, rotate, or select several objects.' },
@@ -90,6 +92,8 @@ function Minimap({ editor, navigate }: { editor: EditorState; navigate: (point: 
 }
 
 export default function MuzeEditor() {
+  const [museOpen, setMuseOpen] = useState(false);
+  const museActive = useRef(false); museActive.current = museOpen;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null), engine = useRef<WhiteboardEngine | null>(null);
   const [status, setStatus] = useState('Opening…');
@@ -130,7 +134,8 @@ export default function MuzeEditor() {
     commit({ ...value, boards: value.boards.map(board => board.id === value.activeBoard ? update(board) : board) });
   }, [commit]);
   const changeDrawing = useCallback((drawing: Drawing) => updateBoard(board => ({ ...board, pages: board.pages.map(p => p.id === board.activePage ? { ...p, ...drawing } : p) })), [updateBoard]);
-  const mount = useCallback((value: WhiteboardEngine | null) => { engine.current = value; if (value) { value.paint = { ...INITIAL_PAINT }; value.setDark(dark); value.grid = grid; setPaint(INITIAL_PAINT); } }, [dark, grid]);
+  const mount = useCallback((value: WhiteboardEngine | null) => { engine.current = value; if (value) { value.setEnabled(!museActive.current); value.paint = { ...INITIAL_PAINT }; value.setDark(dark); value.grid = grid; setPaint(INITIAL_PAINT); } }, [dark, grid]);
+  useEffect(() => { engine.current?.setEnabled(!museOpen); if (museOpen) { setPopup(null); setStylesOpen(false); } }, [museOpen]);
   useEffect(() => { engine.current?.setDark(dark); }, [dark]);
   useEffect(() => { if (engine.current) engine.current.grid = grid; }, [grid]);
   const chooseTool = (tool: Tool) => { engine.current?.setTool(tool); setPopup(null); };
@@ -148,6 +153,7 @@ export default function MuzeEditor() {
   }
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (museActive.current) return;
       if (event.key === 'Escape') { setPopup(null); setStylesOpen(false); }
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === 's') { event.preventDefault(); saveFile(); }
@@ -160,6 +166,7 @@ export default function MuzeEditor() {
   if (!workspace || !active || !page) return <main className="muze-loading"><span>Muse Board</span><i/>{toast && <p role="alert">{toast}</p>}</main>;
   const gridDots = gridPattern(editor.zoom, editor.viewport[4], editor.viewport[5]);
   const selected = editor.selected > 0;
+  const boardContext = makeBoardContext(active.name, page.name, page.objects);
   const textStyles = ['text', 'note', 'shape', 'arrow'].includes(editor.selectionKind) || ['text', 'note'].includes(editor.tool);
   const lineStyles = !['text', 'note', 'image'].includes(editor.selectionKind) && !['text', 'note'].includes(editor.tool);
   const arrowStyles = editor.selectionKind === 'arrow' || editor.tool === 'arrow';
@@ -186,8 +193,9 @@ export default function MuzeEditor() {
   </>;
   return <main className={'muze-app' + (dark ? ' muze-dark' : '')} aria-label="Muse Board" data-ready={editor.ready} aria-busy={!editor.ready}
     onPointerDown={event => { if (!(event.target as HTMLElement).closest('button,input,select,.muze-popover,.muze-style-panel')) setPopup(null); }}
-    onContextMenuCapture={event => { event.preventDefault(); const target = engine.current?.canvas.findTarget(event.nativeEvent).target; if (target) engine.current?.canvas.setActiveObject(target); setContextPoint({ x: Math.min(event.clientX, window.innerWidth - 242), y: Math.min(event.clientY, window.innerHeight - 310) }); setPopup('context'); }}
-    onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file?.type.startsWith('image/')) void engine.current?.addImage(file); else if (file) void openFile(file); }}>
+    onContextMenuCapture={event => { if (museOpen || (event.target as HTMLElement).closest('[data-muse-ui]')) return; event.preventDefault(); const target = engine.current?.canvas.findTarget(event.nativeEvent).target; if (target) engine.current?.canvas.setActiveObject(target); setContextPoint({ x: Math.min(event.clientX, window.innerWidth - 242), y: Math.min(event.clientY, window.innerHeight - 310) }); setPopup('context'); }}
+    onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (museOpen) return; const file = event.dataTransfer.files[0]; if (file?.type.startsWith('image/')) void engine.current?.addImage(file); else if (file) void openFile(file); }}>
+    <div className="muze-board-layer" inert={museOpen} aria-hidden={museOpen} style={{ visibility: museOpen ? 'hidden' : 'visible' }}>
     {grid && <svg className="muze-grid" aria-hidden="true"><defs><pattern id="muze-grid-dots" patternUnits="userSpaceOnUse" x={gridDots.x} y={gridDots.y} width={gridDots.spacing} height={gridDots.spacing}><circle cx={gridDots.spacing / 2} cy={gridDots.spacing / 2} r="1" fill="var(--grid-dot)"/></pattern></defs><rect width="100%" height="100%" fill="url(#muze-grid-dots)"/></svg>}
     <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>
     {editor.guides.length > 0 && <svg className="muze-snap-guides" aria-hidden="true"><g transform={`translate(${editor.viewport[4]} ${editor.viewport[5]}) scale(${editor.zoom})`}>{editor.guides.map((line, index) => <line key={index} {...line} stroke="#e44b7a" strokeWidth={1 / editor.zoom} strokeDasharray={`${4 / editor.zoom} ${4 / editor.zoom}`}/>)}</g></svg>}
@@ -243,5 +251,11 @@ export default function MuzeEditor() {
     {toast && <div className="muze-toast" role="alert">{toast}<Button label="Dismiss message" onClick={() => setToast('')}><X size={14}/></Button></div>}
     <input ref={boardInput} aria-label="Open a board file" type="file" accept=".muze,.json" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }}/>
     <input ref={imageInput} aria-label="Choose an image" type="file" accept="image/*" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void engine.current?.addImage(file); }}/>
+    </div>
+    <MuseCompanion thread={active.id + ':' + page.id} boardContext={boardContext} applyActions={actions => {
+      const now = current.current, board = now?.boards.find(board => board.id === now.activeBoard);
+      if (!board || board.id !== active.id || board.activePage !== page.id || museActive.current) return { ids: [], skipped: actions.cards.length + actions.updates.length };
+      return engine.current?.applyMuseActions(actions) || { ids: [], skipped: actions.cards.length + actions.updates.length };
+    }} addToBoard={text => engine.current?.addMuseText(text)} open={museOpen} onOpenChange={setMuseOpen} obstacles={editor.items.map(box => ({ id: box.id, x: box.x * editor.zoom + editor.viewport[4], y: box.y * editor.zoom + editor.viewport[5], w: box.w * editor.zoom, h: box.h * editor.zoom }))}/>
   </main>;
 }

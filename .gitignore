@@ -14,3 +14,6 @@ verification/
 *.mdx
 *.pem
 *.key
+
+.muze-private/
+.clerk/

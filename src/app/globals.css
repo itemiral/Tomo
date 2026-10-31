@@ -5,3 +5,5 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;overscroll-b
 .muze-loading i{height:3px;width:34px;background:#2e70d6;border-radius:3px;animation:muze-load 1s ease-in-out infinite alternate}
 @keyframes muze-load{to{opacity:.2;transform:scaleX(.5)}}
 @media(prefers-reduced-motion:reduce){.muze-loading i{animation:none}}
+
+.muze-auth-page{display:flex;min-height:100dvh;align-items:center;justify-content:center;padding:24px;background:#f9fafb}

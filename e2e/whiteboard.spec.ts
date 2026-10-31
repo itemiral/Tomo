@@ -23,7 +23,7 @@ test('draws shapes, connected arrows, handwriting, editable text and notes on ou
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await ready(page); await expect(page).toHaveTitle('Muse Board — your whiteboard');
   await expect(page.getByText(/license for production/i)).toHaveCount(0);
-  expect((await request.post('/api/muse/chat', { data: {} })).status()).toBe(404);
+  expect((await request.get('/api/muse/chat?thread=board:page')).status()).toBe(401);
   await stroke(page, 'Rectangle', { x: 250, y: 220 }, { x: 440, y: 350 });
   await stroke(page, 'Rectangle', { x: 700, y: 220 }, { x: 890, y: 350 });
   await stroke(page, 'Arrow', { x: 345, y: 285 }, { x: 795, y: 285 });

@@ -5,18 +5,20 @@ import { GRID_STEP } from './grid';
 import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
 import { FONTS, SIZES, loadFonts, pale, svgFonts } from './styles';
 import { download, filename, parseObjects, type Drawing } from './storage';
+import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
 type EditableText = IText | Textbox | MuzeText | MuzeLabel | MuzeNote;
 
 export type Tool = 'select' | 'hand' | 'draw' | 'eraser' | 'arrow' | 'text' | 'note' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'line' | 'highlight' | 'frame' | 'laser' | Geo;
 export type Paint = { color: string; fill: 'none' | 'soft' | 'solid' | 'pattern'; size: number; dash: 'draw' | 'solid' | 'dashed' | 'dotted'; opacity: number; font: string; fontSize: number; align: 'left' | 'center' | 'right'; verticalAlign: 'top' | 'middle' | 'bottom'; arrowStart: Arrowhead; arrowEnd: Arrowhead };
-export type EditorState = { ready: boolean; tool: Tool; zoom: number; selected: number; canUndo: boolean; canRedo: boolean; count: number; locked: boolean; snap: boolean; paint: Paint; selectionKind: string; guides: { x1: number; y1: number; x2: number; y2: number }[]; viewport: number[]; items: { x: number; y: number; w: number; h: number }[] };
+export type EditorState = { ready: boolean; tool: Tool; zoom: number; selected: number; canUndo: boolean; canRedo: boolean; count: number; locked: boolean; snap: boolean; paint: Paint; selectionKind: string; guides: { x1: number; y1: number; x2: number; y2: number }[]; viewport: number[]; items: { id?: string; x: number; y: number; w: number; h: number }[] };
 export const INITIAL_PAINT: Paint = { color: '#1d1d1d', fill: 'none', size: 3.5, dash: 'draw', opacity: 1, font: FONTS[0].family, fontSize: 24, align: 'left', verticalAlign: 'middle', arrowStart: 'none', arrowEnd: 'arrow' };
 export const INITIAL_EDITOR: EditorState = { ready: false, tool: 'select', zoom: 1, selected: 0, canUndo: false, canRedo: false, count: 0, locked: false, snap: false, paint: INITIAL_PAINT, selectionKind: 'none', guides: [], viewport: [1, 0, 0, 1, 0, 0], items: [] };
 
 let sharedClipboard: FabricObject | null = null;
 
 export class WhiteboardEngine {
+  private enabled = true;
   readonly canvas: Canvas;
   tool: Tool = 'select';
   paint = { ...INITIAL_PAINT };
@@ -107,14 +109,14 @@ export class WhiteboardEngine {
     window.addEventListener('keydown', keydown); window.addEventListener('keyup', keyup);
     this.disposers.push(() => { window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup); });
     const copy = (event: ClipboardEvent) => {
-      if (this.editing() || !c.getActiveObjects().length) return;
+      if (!this.enabled || this.editing() || !c.getActiveObjects().length) return;
       event.preventDefault(); event.clipboardData?.setData('text/plain', this.clipboardPayload());
       void this.copy(event.type === 'cut');
     };
     window.addEventListener('copy', copy); window.addEventListener('cut', copy);
     this.disposers.push(() => { window.removeEventListener('copy', copy); window.removeEventListener('cut', copy); });
     const paste = (event: ClipboardEvent) => {
-      if (this.editing()) return;
+      if (!this.enabled || this.editing()) return;
       const image = Array.from(event.clipboardData?.files || []).find(file => file.type.startsWith('image/'));
       const text = event.clipboardData?.getData('text/plain');
       if (image) { event.preventDefault(); void this.addImage(image); }
@@ -162,7 +164,7 @@ export class WhiteboardEngine {
     if (this.closed) return;
     const active = this.canvas.getActiveObjects().filter(o => !o.labelFor), first = active[0];
     const kind = active.length > 1 ? 'mixed' : first instanceof MuzeNote ? 'note' : first instanceof IText ? 'text' : first instanceof MuzeArrow ? 'arrow' : first instanceof FabricImage ? 'image' : first ? 'shape' : 'none';
-    this.state({ ready: !this.loading, tool: this.tool, zoom: this.canvas.getZoom(), selected: active.length, canUndo: this.history.length > 1, canRedo: !!this.future.length, count: this.canvas.getObjects().filter(o => !o.labelFor).length, locked: this.locked, snap: this.snap, paint: this.selectionPaint(), selectionKind: kind, guides: this.guides, viewport: [...this.canvas.viewportTransform], items: this.canvas.getObjects().filter(o => !o.labelFor).map(object => { const b = object.getBoundingRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; }) });
+    this.state({ ready: !this.loading, tool: this.tool, zoom: this.canvas.getZoom(), selected: active.length, canUndo: this.history.length > 1, canRedo: !!this.future.length, count: this.canvas.getObjects().filter(o => !o.labelFor).length, locked: this.locked, snap: this.snap, paint: this.selectionPaint(), selectionKind: kind, guides: this.guides, viewport: [...this.canvas.viewportTransform], items: this.canvas.getObjects().filter(o => !o.labelFor).map(object => { const b = object.getBoundingRect(); return { id: object.id, x: b.left, y: b.top, w: b.width, h: b.height }; }) });
   }
   private publish() { if (this.loading || this.closed) return; this.changed(this.serialize()); this.emit(); }
   checkpoint() {
@@ -283,6 +285,57 @@ export class WhiteboardEngine {
     const options = { id: crypto.randomUUID(), left: note ? point.x - 100 : point.x, top: note ? point.y - 100 : point.y - Math.round(this.paint.fontSize * 1.35) / 2, width: note ? 200 : width || 16, minWidth: 1, autoWidth: !note && !width, fontSize: note ? size?.label || 22 : this.paint.fontSize, fontFamily: this.paint.font, fontWeight: note ? 500 : 400, lineHeight: 1, fill: note ? '#000000' : color, backgroundColor: note ? ['#202124', '#1d1d1d'].includes(color) ? '#fbe19d' : pale(color, .3) : '', stroke: note ? color : undefined, strokeWidth: 0, inset: 16, boxHeight: note ? 200 : undefined, verticalAlign: this.paint.verticalAlign, padding: 0, muzeKind: note ? 'note' : 'text', textAlign: note ? 'center' : this.paint.align, opacity: this.paint.opacity, objectCaching: false };
     const object = note ? new MuzeNote(text, options) : new MuzeText(text, options);
     this.canvas.add(object); this.setTool('select'); this.canvas.setActiveObject(object); this.growText(object); object.enterEditing(); object.selectAll(); this.canvas.requestRenderAll(); this.assignFrames(); this.checkpoint();
+  }
+  addMuseText(text: string) {
+    const plain = text.replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.*?)\*\*/g, '$1');
+    const boxes = this.canvas.getObjects().map(object => object.getBoundingRect()), center = this.center();
+    const left = boxes.length ? Math.max(...boxes.map(box => box.left + box.width)) + 80 : center.x - 260;
+    const object = new MuzeText(plain, { id: crypto.randomUUID(), left, top: center.y - 170, width: 520, autoWidth: false, fontFamily: FONTS[1].family, fontSize: 22, lineHeight: 1.3, fill: '#1d1d1d', muzeKind: 'text', objectCaching: false });
+    this.canvas.add(object); this.setTool('select'); this.canvas.setActiveObject(object); this.assignFrames(); this.checkpoint(); this.fit(true);
+  }
+  applyMuseActions(actions: MuseActions): MuseApplyResult {
+    if (this.closed || this.loading || !this.enabled) return { ids: [], skipped: actions.cards.length + actions.updates.length };
+    const c = this.canvas, changed: FabricObject[] = [];
+    let skipped = 0;
+    // Keep any newer text or active edits made while Muse was answering.
+    for (const update of actions.updates) {
+      const object = c.getObjects().find(item => item.id === update.id);
+      if (!(object instanceof IText) || object.isLocked || object.isEditing || object.isMoving || object.labelFor || object.text !== update.expectedText) { skipped++; continue; }
+      const before = object.getBoundingRect();
+      object.set({ text: update.text, styles: {} }); object.initDimensions(); this.growText(object);
+      const after = object.getBoundingRect();
+      if (after.height > before.height + 1 && c.getObjects().some(other => {
+        if (other === object || other.labelFor || other.muzeKind === 'frame') return false;
+        const b = other.getBoundingRect();
+        return after.left < b.left + b.width && after.left + after.width > b.left && after.top < b.top + b.height && after.top + after.height > b.top;
+      })) {
+        const right = Math.max(...c.getObjects().filter(other => other !== object).map(other => { const b = other.getBoundingRect(); return b.left + b.width; }));
+        object.set('left', right + 48); object.setCoords();
+      }
+      changed.push(object);
+    }
+    const center = this.center(), boxes = c.getObjects().map(object => object.getBoundingRect());
+    const columns = c.width < 700 ? 1 : 2, width = 320, gap = 28;
+    const left = boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
+    let top = boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;
+    for (const card of actions.cards) {
+      if (c.getObjects().some(object => object.id === card.id)) continue;
+      if (index && index % columns === 0) { top += rowHeight + gap; rowHeight = 0; }
+      const object = new MuzeNote(card.title + '\n\n' + card.body, { id: card.id, left: left + (index % columns) * (width + gap), top, width, boxHeight: 210, inset: 22, fontSize: 18, fontFamily: FONTS[1].family, fontWeight: 400, lineHeight: 1.2, textAlign: 'left', verticalAlign: 'top', fill: '#1d1d1d', backgroundColor: ['#f8e9b5', '#dfece5', '#e4e7f5'][index % 3], stroke: '#1d1d1d', strokeWidth: 0, muzeKind: 'note', objectCaching: false });
+      object.setSelectionStyles({ fontWeight: 600 }, 0, card.title.length);
+      object.initDimensions(); object.setCoords();
+      c.add(object); changed.push(object); rowHeight = Math.max(rowHeight, object.height); index++;
+    }
+    if (changed.length) {
+      this.assignFrames(); this.connectors(); this.checkpoint();
+      const bounds = changed.map(object => object.getBoundingRect());
+      const l = Math.min(...bounds.map(b => b.left)), t = Math.min(...bounds.map(b => b.top)), r = Math.max(...bounds.map(b => b.left + b.width)), b = Math.max(...bounds.map(b => b.top + b.height));
+      const startX = c.width > 1000 ? 510 : 36, endX = c.width > 1000 ? c.width - 240 : c.width - 36;
+      const zoom = Math.max(.55, Math.min(1, (endX - startX) / Math.max(1, r - l), (c.height - 200) / Math.max(1, b - t)));
+      c.setViewportTransform([zoom, 0, 0, zoom, startX + (endX - startX - (r - l) * zoom) / 2 - l * zoom, 110 - t * zoom]);
+      this.publish();
+    }
+    return { ids: changed.map(object => object.id!), skipped };
   }
   private growText(object: EditableText) {
     if (object instanceof MuzeText && object.autoWidth) {
@@ -564,9 +617,19 @@ export class WhiteboardEngine {
     } catch { this.report('Could not export that image. Try a smaller selection.'); }
     finally { this.dark = dark; this.exporting = false; this.canvas.setViewportTransform(viewport); this.canvas.requestRenderAll(); }
   }
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    if (!enabled) {
+      const active = this.canvas.getActiveObject();
+      if (active instanceof IText && active.isEditing) active.exitEditing();
+      this.space = false;
+      this.setTool(this.tool);
+    }
+  }
   private editing() { const target = document.activeElement; return !!target?.closest('input,textarea,select,[contenteditable="true"]') || (this.canvas.getActiveObject() instanceof IText && (this.canvas.getActiveObject() as IText).isEditing); }
   private key(event: KeyboardEvent) {
-    if (this.loading) return;
+    if (!this.enabled || this.loading) return;
+    if (event.target instanceof Element && event.target.closest('[data-muse-ui]') && ['Enter', ' '].includes(event.key)) return;
     const key = event.key.toLowerCase(), mod = event.metaKey || event.ctrlKey;
     if (this.editing()) {
       if (this.canvas.getActiveObject() instanceof IText) {
