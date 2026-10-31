@@ -1,5 +1,5 @@
-import { MuseWorkspace } from '@/components/muse/workspace';
+import { MuzeWorkspace } from '@/components/muze/workspace';
 
 export default function Page() {
-  return <MuseWorkspace/>;
+  return <MuzeWorkspace/>;
 }
