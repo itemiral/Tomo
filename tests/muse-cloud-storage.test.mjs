@@ -20,7 +20,7 @@ await db.exec(`
   grant usage on schema auth to anon, authenticated;
   grant execute on function auth.jwt() to anon, authenticated;
 `);
-await db.exec(await readDiskFile(new URL('../supabase/migrations/20261101190708_private_muse_storage.sql', import.meta.url), 'utf8'));
+await db.exec(await readDiskFile(new URL('../supabase/migrations/20261101191930_private_muse_storage.sql', import.meta.url), 'utf8'));
 after(async () => { await db.close(); await rm(localDirectory, { recursive: true, force: true }); });
 
 function asUser(ownerId, operation, role = 'authenticated') {
