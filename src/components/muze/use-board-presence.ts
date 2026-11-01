@@ -60,11 +60,11 @@ export function useBoardPresence(options:Options){
    finally{trackBusy=false;}
    if(authorized()&&(!announced||JSON.stringify(desired())!==JSON.stringify(announced)))scheduleTrack(1000);
   };
-  const hide=()=>{pointer=null;queueCursor(null);};
+  const hide=()=>{const visible=pointer!==null;pointer=null;if(!visible)return;queueCursor(null);if(cursorTimer){clearTimeout(cursorTimer);cursorTimer=undefined;flushCursor();}};
   const changed=()=>{if(announced?.pageId!==current.current.pageId)queueCursor(null);scheduleTrack();};
   const room={scope,changed};roomRef.current=room;
   const move=(event:PointerEvent)=>{
-   if(event.pointerType==='touch'||document.hidden||!(event.target instanceof Element)||!event.target.closest('.muze-drawing-surface')){hide();return;}
+   if(event.pointerType==='touch'||document.hidden||!(event.target instanceof Element)||!event.target.closest('.muze-app')){hide();return;}
    pointer={x:event.clientX,y:event.clientY};queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));
   };
   const leave=(event:PointerEvent)=>{if(!event.relatedTarget)hide();};
@@ -94,9 +94,8 @@ export function useBoardPresence(options:Options){
   void refreshAuth();
   const refresh=setInterval(()=>void refreshAuth(),30000);
   const keepalive=setInterval(()=>{if(pointer&&!document.hidden&&authorized()&&ready)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));},3000);
-  const expiry=setInterval(()=>{let changed=false;for(const [key,cursor] of cursors)if(Date.now()-cursor.receivedAt>10000){cursors.delete(key);changed=true;}if(changed)render();},2000);
-  window.addEventListener('pointermove',move);window.addEventListener('pointerout',leave);window.addEventListener('blur',hide);document.addEventListener('visibilitychange',visibility);render();
-  return()=>{cancelled=true;pointer=null;ready=false;if(roomRef.current===room)roomRef.current=null;clearInterval(refresh);clearInterval(keepalive);clearInterval(expiry);for(const timer of [cursorTimer,trackTimer,authRetry,tokenTimer,restartTimer])if(timer)clearTimeout(timer);window.removeEventListener('pointermove',move);window.removeEventListener('pointerout',leave);window.removeEventListener('blur',hide);document.removeEventListener('visibilitychange',visibility);void client.removeChannel(channel);};
+  window.addEventListener('pointermove',move,{capture:true,passive:true});window.addEventListener('pointerout',leave);window.addEventListener('blur',hide);document.addEventListener('visibilitychange',visibility);render();
+  return()=>{cancelled=true;pointer=null;ready=false;if(roomRef.current===room)roomRef.current=null;clearInterval(refresh);clearInterval(keepalive);for(const timer of [cursorTimer,trackTimer,authRetry,tokenTimer,restartTimer])if(timer)clearTimeout(timer);window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerout',leave);window.removeEventListener('blur',hide);document.removeEventListener('visibilitychange',visibility);void client.removeChannel(channel);};
  },[scope,client,connection]);
  useEffect(()=>{const room=roomRef.current;if(room?.scope===scope)room.changed();},[scope,options.name,options.pageId,options.museWorking]);
  return view.scope===scope&&scope?view:{scope,peers:[],cursors:[],connected:false};

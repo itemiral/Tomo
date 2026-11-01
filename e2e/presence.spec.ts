@@ -55,7 +55,7 @@ function compiledFixture() {
       import './src/app/globals.css'; import './src/components/muze/whiteboard.css'; import './src/components/muse/muse.css';
       function Board(){
         const seed=window.presenceSeed;
-        const [userId,setUserId]=useState(seed.userId),[pageId,setPageId]=useState('page-one'),[enabled,setEnabled]=useState(true),[museWorking,setWorking]=useState(false),[viewport,setViewport]=useState(seed.viewport);
+        const [userId,setUserId]=useState(seed.userId),[pageId,setPageId]=useState('page-one'),[enabled,setEnabled]=useState(true),[museWorking,setWorking]=useState(false),[viewport,setViewport]=useState(seed.viewport),[clicks,setClicks]=useState(0);
         const presence=useBoardPresence({boardId:seed.boardId,userId,name:seed.name,pageId,viewport,enabled,museWorking,soul:'SECRET_SOUL',memory:'SECRET_MEMORY',chat:'SECRET_CHAT'});
         return <main className="muze-app"><div className="muze-drawing-surface" style={{position:'fixed',inset:0}} aria-label="Shared canvas"/>
           <nav style={{position:'fixed',top:12,left:12,zIndex:1000}} data-muse-ui="true">
@@ -68,6 +68,9 @@ function compiledFixture() {
             <button onClick={()=>window.presenceUnmount()}>Leave board</button>
             <input aria-label="Private chat" value="SECRET_CHAT" readOnly/>
           </nav>
+          <div className="muse-chat-stack" style={{position:'fixed',left:400,top:400,bottom:'auto',width:300,zIndex:24,transform:'none'}} onPointerMove={event=>event.stopPropagation()}>
+            <button aria-label="Chat overlay action" style={{width:300,height:100,background:'#fff',pointerEvents:'auto'}} onClick={()=>setClicks(value=>value+1)}>Chat action {clicks}</button>
+          </div>
           <BoardParticipants peers={presence.peers} userId={userId} connected={presence.connected}/>
           <BoardPeerCursors cursors={presence.cursors} pageId={pageId} viewport={viewport}/>
           <BoardPeerMuses peers={presence.peers} userId={userId} pageId={pageId}/>
@@ -131,11 +134,46 @@ test('late joiners see stationary cursors and keepalives preserve them until the
   await fixture(ada,bus,'ada');await expect(ada.getByLabel('People on this board')).toContainText('You');await ada.mouse.move(500,350);
   await fixture(bo,bus,'bo');await expect(bo.getByLabel('People on this board')).toContainText('Ada');
   await ada.clock.runFor(3100);const cursor=bo.getByLabel('Ada’s cursor',{exact:true});await expect(cursor).toBeVisible();
+  // A connected peer keeps its last position even when no cursor heartbeat arrives.
+  const cursorMessages=bus.messages.filter(message=>message.operation==='broadcast').length;
+  await bo.clock.runFor(16000);await expect(cursor).toBeVisible();
+  expect(bus.messages.filter(message=>message.operation==='broadcast')).toHaveLength(cursorMessages);
   for(let interval=0;interval<5;interval++){await ada.clock.runFor(3000);await bo.clock.runFor(3000);await expect(cursor).toBeVisible();}
   await ada.getByRole('button',{name:'Pan and zoom',exact:true}).focus();await ada.keyboard.press('Enter');await ada.clock.runFor(3100);
   await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(840);await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(620);
-  await ada.mouse.move(20,20);await ada.clock.runFor(100);await expect(cursor).toHaveCount(0);
+  await ada.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerout',{relatedTarget:null})));await expect(cursor).toHaveCount(0);
   await ada.clock.runFor(12000);await expect(cursor).toHaveCount(0);
+ }finally{await a.close();await b.close();}
+});
+
+test('cursor positions include chat and toolbar controls without blocking their clicks',async({browser})=>{
+ const bus=transport(),a=await browser.newContext(),b=await browser.newContext();
+ try{
+  const ada=await a.newPage(),bo=await b.newPage();
+  await ada.clock.install();await bo.clock.install();
+  await fixture(ada,bus,'ada');await fixture(bo,bus,'bo');
+  await expect(bo.getByLabel('People on this board')).toContainText('Ada');
+  const tracks=bus.messages.filter(message=>message.operation==='track').length;
+  const cursor=bo.getByLabel('Ada’s cursor',{exact:true});
+  await ada.mouse.move(440,430);await ada.clock.runFor(100);
+  await expect(cursor).toBeVisible();
+  await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(440);
+  const layer=await bo.locator('.board-peer-cursors').evaluate(element=>({z:Number(getComputedStyle(element).zIndex),nonInteractive:[element,...element.querySelectorAll('*')].every(item=>getComputedStyle(item).pointerEvents==='none')}));
+  expect(layer.z).toBeGreaterThan(1000);expect(layer.nonInteractive).toBe(true);
+  expect(await bo.evaluate(()=>document.elementFromPoint(444,435)?.closest('button')?.getAttribute('aria-label'))).toBe('Chat overlay action');
+  await bo.mouse.click(444,435);await expect(bo.getByRole('button',{name:'Chat overlay action',exact:true})).toHaveText('Chat action 1');
+  const label=await cursor.locator('.board-cursor-label').boundingBox();
+  await bo.mouse.click(label!.x+label!.width/2,label!.y+label!.height/2);
+  await expect(bo.getByRole('button',{name:'Chat overlay action',exact:true})).toHaveText('Chat action 2');
+  const toolbar=await ada.getByRole('button',{name:'Pan and zoom',exact:true}).boundingBox();
+  await ada.mouse.move(toolbar!.x+8,toolbar!.y+8);await ada.clock.runFor(100);
+  await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(Math.round(toolbar!.x+8));
+  await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(Math.round(toolbar!.y+8));
+  // Hiding the tab clears the pointer immediately, without a delayed timer or presence update.
+  await ada.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
+  await expect(cursor).toHaveCount(0);
+  expect(bus.messages.filter(message=>message.operation==='track')).toHaveLength(tracks);
+  expect(bus.messages.filter(message=>message.operation==='untrack')).toHaveLength(0);
  }finally{await a.close();await b.close();}
 });
 
