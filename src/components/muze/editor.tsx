@@ -11,6 +11,7 @@ import type { Arrowhead } from './objects';
 import { gridPattern } from './grid';
 import { MIN_ZOOM, MAX_ZOOM } from './zoom';
 import { createSaveFeedback } from './save-feedback';
+import { CanvasTooltips } from './tooltips';
 import './whiteboard.css';
 import { UserButton, useUser } from '@clerk/nextjs';
 import { CanvasComments } from './comments';
@@ -238,6 +239,7 @@ export default function MuzeEditor() {
     onPointerDown={event => { if (!(event.target as HTMLElement).closest('button,input,select,.muze-popover,.muze-style-panel')) setPopup(null); }}
     onContextMenuCapture={event => { if ((event.target as HTMLElement).closest('[data-muse-ui]')) return; event.preventDefault(); const target = engine.current?.canvas.findTarget(event.nativeEvent).target; if (target) engine.current?.canvas.setActiveObject(target); setContextPoint({ x: Math.min(event.clientX, window.innerWidth - 242), y: Math.min(event.clientY, window.innerHeight - 310) }); setPopup('context'); }}
     onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); const files=Array.from(event.dataTransfer.files); if(files.length) {void (async()=>{for(const file of files)await acceptFile(file);})();} else {const text=event.dataTransfer.getData('text/plain');if(text)engine.current?.addMuseText(text);else setToast('This drop could not be read. Add an image or a written description.');} }}>
+    <CanvasTooltips/>
     <div className="muze-board-layer">
     {grid && <svg className="muze-grid" aria-hidden="true"><defs><pattern id="muze-grid-dots" patternUnits="userSpaceOnUse" x={gridDots.x} y={gridDots.y} width={gridDots.spacing} height={gridDots.spacing}><circle cx={gridDots.spacing / 2} cy={gridDots.spacing / 2} r="1" fill="var(--grid-dot)"/></pattern></defs><rect width="100%" height="100%" fill="url(#muze-grid-dots)"/></svg>}
     <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>

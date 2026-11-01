@@ -107,9 +107,6 @@
 @media(prefers-reduced-motion:reduce){.muze-app *{animation:none!important;transition:none!important}}
 
 .muze-button{position:relative}
-.muze-button::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 9px);left:50%;transform:translateX(-50%);width:max-content;max-width:225px;white-space:pre-line;text-align:left;padding:8px 10px;border-radius:6px;background:#202124;color:#fff;font:11px/1.55 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 2px 8px #0002;pointer-events:none;opacity:0;visibility:hidden;z-index:60;transition:opacity .12s,visibility .12s}
-.muze-button:hover:not(:disabled)::after,.muze-button:focus-visible::after{opacity:1;visibility:visible;transition-delay:.45s}
-.muze-style-panel .muze-button::after{left:auto;right:calc(100% + 12px);bottom:50%;transform:translateY(50%)}
 .muze-colors .muze-button.active span{box-shadow:none}
 .muze-colors .muze-button span{width:16px;height:16px}
 .muze-style-panel{top:66px}
@@ -121,11 +118,7 @@
 .muze-more-tools{width:292px;gap:10px 5px;max-height:calc(100vh - 175px);overflow:auto}
 .muze-quick-actions .muze-button.active{background:var(--panel);color:var(--blue)}
 .muze-tools .muze-button[data-testid="tool-draw"]{margin-left:3px}
-.muze-header .muze-button::after{top:calc(100% + 9px);bottom:auto;left:0;transform:none}
-.muze-header-right .muze-button::after{left:auto;right:0}
-.muze-navigation .muze-button::after{left:0;transform:none}
-.muze-bottom-right .muze-button::after{left:auto;right:0;transform:none}
-@media(max-width:700px){.muze-style-panel{top:60px}.muze-more-tools{max-height:calc(100dvh - 175px)}.muze-button::after{display:none}.muze-style-panel .muze-button::after{display:none}}
+@media(max-width:700px){.muze-style-panel{top:60px}.muze-more-tools{max-height:calc(100dvh - 175px)}}
 
 .muze-zoom-label{font-weight:500!important;line-height:1.6!important}
 
@@ -141,8 +134,8 @@
 @media(max-width:700px){.muze-tools-scroll{gap:1px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;touch-action:pan-x}.muze-tools-scroll .muze-button{touch-action:pan-x}.muze-tools{max-width:calc(100vw - 16px)}.muze-tools .muze-button[data-testid="tool-draw"]{margin-left:0}}
 
 .muze-share{width:36px;height:36px;border-radius:8px}
-.muze-share.active::after{display:none}
 .muze-sign-in{height:36px;padding:0 16px!important;border-radius:7px;background:#2e70d6!important;color:#fff!important;font-size:12px!important;font-weight:600!important;white-space:nowrap;flex-shrink:0}
 .muze-sign-in:hover{background:#2563c4!important}
 .muze-app:has(.muze-sign-in) .muze-export-menu{right:min(150px,calc(100vw - 236px))}
 @media(max-width:700px){.muze-header:has(.muze-sign-in) .muze-brand>span{display:none}.muze-header-right{flex-shrink:0}.muze-sign-in{padding:0 12px!important}.muze-header:has(.muze-sign-in) .muze-project .muze-page-trigger{max-width:70px}}
+.muze-tooltip{position:fixed;z-index:200;width:max-content;max-width:min(260px,calc(100vw - 24px));padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:0 4px 18px #202c3d16;font:12px/1.5 Inter,sans-serif;pointer-events:none;white-space:normal;overflow-wrap:anywhere}.muze-tooltip>div{display:flex;align-items:center;justify-content:space-between;gap:18px}.muze-tooltip strong{font-weight:600}.muze-tooltip kbd{font:11px/1.4 Inter,sans-serif;color:var(--muted)}.muze-tooltip p{margin:4px 0 0;color:var(--muted)}
