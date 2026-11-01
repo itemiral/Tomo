@@ -64,6 +64,7 @@ function compiledFixture() {
             <button onClick={()=>setWorking(v=>!v)}>Toggle Muse work</button>
             <button onClick={()=>setEnabled(v=>!v)}>Private notebook</button>
             <button onClick={()=>{setUserId(undefined);window.presenceOwner=undefined;window.dispatchEvent(new Event('presence-owner'));}}>Sign out</button>
+            <button onClick={()=>{setUserId('bo');window.presenceOwner='bo';window.dispatchEvent(new Event('presence-owner'));}}>Switch account</button>
             <button onClick={()=>window.presenceUnmount()}>Leave board</button>
             <input aria-label="Private chat" value="SECRET_CHAT" readOnly/>
           </nav>
@@ -74,19 +75,17 @@ function compiledFixture() {
       }
       const root=createRoot(document.getElementById('root'));window.presenceUnmount=()=>root.unmount();root.render(<Board/>);
     ` },
-    bundle: true, write: false, outdir: '/tmp/muze-presence-fixture', platform: 'browser', format: 'iife', jsx: 'automatic', external: ['/fonts/*'], define: { 'process.env.NODE_ENV': '"production"' },
+    bundle: true, write: false, outdir: '/tmp/muze-presence-fixture', platform: 'browser', format: 'iife', jsx: 'automatic', external: ['/fonts/*'], define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_SUPABASE_URL':'"https://presence.invalid"', 'process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY':'"fixture-public-key"' },
     plugins: [{ name: 'presence-transport-fixture', setup(b) {
       b.onResolve({ filter: /^@clerk\/nextjs$/ }, () => ({ path: 'clerk', namespace: 'presence' }));
-      b.onResolve({ filter: /utils\/supabase\/client$/ }, () => ({ path: 'transport', namespace: 'presence' }));
+      b.onResolve({ filter: /^@supabase\/supabase-js$/ }, () => ({ path: 'transport', namespace: 'presence' }));
       b.onLoad({ filter: /.*/, namespace: 'presence' }, args => ({ loader: 'tsx', resolveDir: resolve('.'), contents: args.path === 'clerk' ? `
         import {useState,useEffect,useMemo} from 'react';
-        export function useSession(){const [owner,setOwner]=useState(window.presenceOwner);useEffect(()=>{const change=()=>setOwner(window.presenceOwner);window.addEventListener('presence-owner',change);return()=>window.removeEventListener('presence-owner',change)},[]);const session=useMemo(()=>owner?{id:'session-'+owner,getToken:async()=>{window.presenceTokenAttempts=(window.presenceTokenAttempts||0)+1;if(window.presenceTokenFailures>0){window.presenceTokenFailures--;throw new Error('Temporary network failure');}return 'test-session:'+owner;},user:{id:owner}}:null,[owner]);return {session,isLoaded:true,isSignedIn:!!owner};}
+        export function useSession(){const [resource,setResource]=useState(0);useEffect(()=>{const change=()=>setResource(value=>value+1);window.addEventListener('presence-owner',change);window.addEventListener('presence-resource',change);return()=>{window.removeEventListener('presence-owner',change);window.removeEventListener('presence-resource',change)}},[]);const owner=window.presenceOwner;const session=useMemo(()=>owner?{id:'session-'+owner,getToken:async()=>{window.presenceTokenAttempts=(window.presenceTokenAttempts||0)+1;window.presenceTokenResource=resource;if(window.presenceTokenFailures>0){window.presenceTokenFailures--;throw new Error('Temporary network failure');}return btoa('{}')+'.'+btoa(JSON.stringify({sub:owner,exp:Math.floor(Date.now()/1000)+60})) +'.test';},user:{id:owner}}:null,[owner,resource]);return {session,isLoaded:true,isSignedIn:!!owner};}
       ` : `
-        import {useEffect,useMemo} from 'react';import {useSession} from '@clerk/nextjs';
         const channels=new Map();
         window.presenceDeliver=(key,kind,value)=>{const channel=channels.get(key);if(!channel)return;if(kind==='sync'){channel.presence=value;for(const cb of channel.handlers.filter(h=>h.kind==='presence'&&h.filter.event==='sync'))cb.callback();}else for(const cb of channel.handlers.filter(h=>h.kind==='broadcast'&&h.filter.event===value.event))cb.callback({payload:value.payload});};
-        function create(session){let token='';const owned=new Set();const client={realtime:{setAuth:async(value)=>{token=value;}},channel(topic,options){const key=options.config.presence.key;const channel={state:'closed',presence:{},handlers:[],on(kind,filter,callback){this.handlers.push({kind,filter,callback});return this;},presenceState(){return this.presence;},subscribe(callback){void session.getToken().then(value=>window.presenceTransport({operation:'subscribe',topic,key,actor:(token||value).slice('test-session:'.length)})).then(status=>{this.state=status==='SUBSCRIBED'?'joined':'closed';callback(status)});return this;},track(payload){return window.presenceTransport({operation:'track',topic,key,payload});},untrack(){return window.presenceTransport({operation:'untrack',topic,key});},send(message){return window.presenceTransport({operation:'broadcast',topic,key,event:message.event,payload:message.payload});},async unsubscribe(){await window.presenceTransport({operation:'leave',topic,key});channels.delete(key);owned.delete(channel);return 'ok';}};channels.set(key,channel);owned.add(channel);return channel;},removeChannel(channel){return channel.unsubscribe();},removeAllChannels(){return Promise.all([...owned].map(c=>c.unsubscribe()));}};return client;}
-        export function useSupabaseClient(){const {session}=useSession();const client=useMemo(()=>session?create(session):null,[session]);useEffect(()=>()=>{if(client)void client.removeAllChannels()},[client]);return client;}
+        export function createClient(_url,_key,{accessToken:getToken}){window.presenceClientCount=(window.presenceClientCount||0)+1;let token='';const owned=new Set();const client={realtime:{setAuth:async(value)=>{token=value;}},channel(topic,options){const key=options.config.presence.key;const channel={state:'closed',presence:{},handlers:[],on(kind,filter,callback){this.handlers.push({kind,filter,callback});return this;},presenceState(){return this.presence;},subscribe(callback){void getToken().then(value=>window.presenceTransport({operation:'subscribe',topic,key,actor:JSON.parse(atob((token||value).split('.')[1])).sub})).then(status=>{this.state=status==='SUBSCRIBED'?'joined':'closed';callback(status)});return this;},track(payload){return window.presenceTransport({operation:'track',topic,key,payload});},untrack(){return window.presenceTransport({operation:'untrack',topic,key});},send(message){return window.presenceTransport({operation:'broadcast',topic,key,event:message.event,payload:message.payload});},async unsubscribe(){this.state='closed';await window.presenceTransport({operation:'leave',topic,key});channels.delete(key);owned.delete(channel);return 'ok';}};channels.set(key,channel);owned.add(channel);return channel;},removeChannel(channel){return channel.unsubscribe();},removeAllChannels(){return Promise.all([...owned].map(c=>c.unsubscribe()));}};return client;}
       ` }));
     } }],
   }).then(result => ({ js: result.outputFiles.find(file => file.path.endsWith('.js'))!.text, css: result.outputFiles.find(file => file.path.endsWith('.css'))!.text }));
@@ -122,6 +121,22 @@ test('board members see named cursors at world positions across pan and zoom', a
     await bo.getByRole('button', { name: 'Change page', exact: true }).click();
     await expect(cursor).toHaveCount(0);
   } finally { await a.close(); await b.close(); }
+});
+
+test('late joiners see stationary cursors and keepalives preserve them until the pointer leaves',async({browser})=>{
+ const bus=transport(),a=await browser.newContext(),b=await browser.newContext();
+ try{
+  const ada=await a.newPage(),bo=await b.newPage();
+  await ada.clock.install();await bo.clock.install();
+  await fixture(ada,bus,'ada');await expect(ada.getByLabel('People on this board')).toContainText('You');await ada.mouse.move(500,350);
+  await fixture(bo,bus,'bo');await expect(bo.getByLabel('People on this board')).toContainText('Ada');
+  await ada.clock.runFor(3100);const cursor=bo.getByLabel('Ada’s cursor',{exact:true});await expect(cursor).toBeVisible();
+  for(let interval=0;interval<5;interval++){await ada.clock.runFor(3000);await bo.clock.runFor(3000);await expect(cursor).toBeVisible();}
+  await ada.getByRole('button',{name:'Pan and zoom',exact:true}).focus();await ada.keyboard.press('Enter');await ada.clock.runFor(3100);
+  await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(840);await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(620);
+  await ada.mouse.move(20,20);await ada.clock.runFor(100);await expect(cursor).toHaveCount(0);
+  await ada.clock.runFor(12000);await expect(cursor).toHaveCount(0);
+ }finally{await a.close();await b.close();}
 });
 
 test('Muse status is public metadata only and private notebooks, sign-out, and unmount clear presence', async ({ browser }) => {
@@ -174,6 +189,37 @@ test('presence recovers after a temporary session-token failure', async ({ brows
     await ada.mouse.move(300, 300);
     await expect(bo.getByLabel('Ada’s cursor', { exact: true })).toBeVisible();
   } finally { await a.close(); await b.close(); }
+});
+
+test('session resource refreshes keep one connection and account changes replace it', async ({page})=>{
+ const bus=transport();await page.clock.install();await fixture(page,bus,'ada');
+ const people=page.getByLabel('People on this board');await expect(people).toContainText('You');
+ await page.evaluate(()=>{const element=document.querySelector('[aria-label="People on this board"]')!;(window as any).connectingFlashes=0;new MutationObserver(()=>{if(element.textContent?.includes('Connecting'))(window as any).connectingFlashes++;}).observe(element,{subtree:true,childList:true,characterData:true});});
+ for(let index=0;index<3;index++){await page.evaluate(()=>window.dispatchEvent(new Event('presence-resource')));await page.clock.runFor(10);}
+ await page.clock.fastForward(30000);
+ await expect.poll(()=>page.evaluate(()=>(window as any).presenceTokenResource)).toBe(3);
+ expect(await page.evaluate(()=>(window as any).presenceClientCount)).toBe(1);
+ expect(bus.messages.filter(message=>message.operation==='subscribe')).toHaveLength(1);
+ expect(bus.messages.filter(message=>message.operation==='leave')).toHaveLength(0);
+ expect(await page.evaluate(()=>(window as any).connectingFlashes)).toBe(0);
+ await page.getByRole('button',{name:'Switch account',exact:true}).click();await expect(people).toContainText('You');
+ await expect.poll(()=>bus.messages.filter(message=>message.operation==='subscribe').length).toBe(2);
+ expect(bus.messages.filter(message=>message.operation==='subscribe').map(message=>message.actor)).toEqual(['ada','bo']);
+ expect(bus.messages.some(message=>message.operation==='leave')).toBe(true);
+ expect(await page.evaluate(()=>(window as any).presenceClientCount)).toBe(2);expect(bus.connections()).toBe(1);
+});
+
+test('temporary token refresh errors keep a valid connection but expiry clears it and recovery rejoins',async({page})=>{
+ const bus=transport();await page.clock.install();await fixture(page,bus,'ada');
+ const people=page.getByLabel('People on this board');await expect(people).toContainText('You');
+ const attempts=await page.evaluate(()=>(window as any).presenceTokenAttempts);
+ await page.evaluate(()=>{(window as any).presenceTokenFailures=20;});await page.clock.fastForward(30000);
+ await expect.poll(()=>page.evaluate(()=>(window as any).presenceTokenAttempts)).toBeGreaterThan(attempts);
+ await expect(people).toContainText('You');expect(bus.messages.filter(message=>message.operation==='leave')).toHaveLength(0);
+ await page.clock.fastForward(31000);await expect(people).toContainText('Connecting');
+ await expect.poll(bus.connections).toBe(0);
+ await page.evaluate(()=>{(window as any).presenceTokenFailures=0;});await page.clock.fastForward(30000);
+ await expect(people).toContainText('You');await expect.poll(bus.connections).toBe(1);
 });
 
 test('presence controls fit the full editor on desktop and mobile', async ({ page }) => {
