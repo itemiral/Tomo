@@ -56,7 +56,11 @@ export async function readMuseNote(ownerId, key) {
   const content = await readFile(path, 'utf8');
   return { key, content, revision: digest(content), updatedAt: info.mtimeMs };
 }
+export const withMuseOwner = (ownerId, operation) => serial('owner:' + ownerId, operation);
 export async function saveMuseNote(ownerId, key, content, revision) {
+  return withMuseOwner(ownerId, () => saveMuseNoteUnlocked(ownerId, key, content, revision));
+}
+export async function saveMuseNoteUnlocked(ownerId, key, content, revision) {
   validNoteKey(key); await ensureMuse(ownerId);
   if (typeof content !== 'string' || Buffer.byteLength(content) > NOTE_LIMIT || content.includes('\0')) throw new MuseStoreError(400, 'Keep this note under 500 KB of text.');
   if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw new MuseStoreError(400, 'Reload this note before saving.');
@@ -97,4 +101,35 @@ export async function readMuseChat(ownerId, thread) {
 export async function saveMuseChat(ownerId, thread, messages) {
   await ensureMuse(ownerId);
   await replaceFile(threadPath(ownerId, thread), JSON.stringify(messages.slice(-32)));
+}
+
+export async function readMuseBoard(ownerId) {
+  await ensureMuse(ownerId);
+  let content;
+  try { content = await readFile(join(museDirectory(ownerId), 'board.json'), 'utf8'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; content = JSON.stringify({ cards: [], comments: [] }); }
+  return { ...JSON.parse(content), revision: digest(content) };
+}
+export async function saveMuseBoard(ownerId, body) {
+  await ensureMuse(ownerId);
+  if (!Array.isArray(body.cards) || !Array.isArray(body.comments) || body.cards.length > 100 || body.comments.length > 100) throw new MuseStoreError(400, 'Keep this board under 100 cards and 100 comments.');
+  const cards = body.cards.map(card => {
+    if (!card || typeof card.id !== 'string' || typeof card.text !== 'string' || card.text.length > 8000 || !['text','markdown'].includes(card.kind)) throw new MuseStoreError(400, 'Add text or Markdown cards. Describe images and other media in text first.');
+    return { id: card.id.slice(0,80), text: card.text, kind: card.kind };
+  });
+  const comments = body.comments.map(comment => {
+    if (!comment || typeof comment.id !== 'string' || typeof comment.text !== 'string' || comment.text.length > 4000) throw new MuseStoreError(400, 'Keep comments under 4,000 characters.');
+    return { id: comment.id.slice(0,80), text: comment.text, author: 'You' };
+  });
+  const content = JSON.stringify({ cards, comments });
+  if (Buffer.byteLength(content) > 64000) throw new MuseStoreError(413, 'This Muse board is full. Shorten some cards before saving.');
+  return serial(join(museDirectory(ownerId), 'board.json'), async () => {
+    const current = await readMuseBoard(ownerId);
+    if (current.revision !== body.revision) throw new MuseStoreError(409, 'This board changed elsewhere. Reload before saving; your draft is still here.');
+    await replaceFile(join(museDirectory(ownerId), 'board.json'), content);
+    return readMuseBoard(ownerId);
+  });
+}
+export function museBoardContext(board) {
+  return [...board.cards.map(card => `[${card.kind} card] ${card.text}`), ...board.comments.map(comment => `[Comment] ${comment.text}`)].join('\n\n');
 }

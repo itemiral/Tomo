@@ -1,23 +1,25 @@
-import { classRegistry, Control, FabricObject, Line, Point, Textbox, util, type TMat2D } from 'fabric';
+import { documentColor } from './document-color';
+import { documentText } from './document-text';
+import { classRegistry, Control, FabricObject, Line, Point, Textbox, util, type TPointerEvent, type TMat2D } from 'fabric';
 
 export type Arrowhead = 'none' | 'arrow' | 'triangle' | 'dot' | 'bar';
 
 declare module 'fabric' {
   interface FabricObject {
-    id?: string; muzeKind?: string; startBinding?: string; endBinding?: string;
+    markdown?: string; documentTitle?: string; id?: string; muzeKind?: string; startBinding?: string; endBinding?: string;
     muzeDash?: string; muzeFill?: string; labelFor?: string; autoWidth?: boolean;
     boxHeight?: number; inset?: number; verticalAlign?: 'top' | 'middle' | 'bottom';
     frameId?: string; isLocked?: boolean; bend?: number; arrowStart?: Arrowhead; arrowEnd?: Arrowhead;
     fontFamily?: string; fontSize?: number; textAlign?: string;
   }
   interface SerializedObjectProps {
-    id?: string; muzeKind?: string; startBinding?: string; endBinding?: string;
+    markdown?: string; documentTitle?: string; id?: string; muzeKind?: string; startBinding?: string; endBinding?: string;
     muzeDash?: string; muzeFill?: string; labelFor?: string; autoWidth?: boolean;
     boxHeight?: number; inset?: number; verticalAlign?: 'top' | 'middle' | 'bottom';
     frameId?: string; isLocked?: boolean; bend?: number; arrowStart?: Arrowhead; arrowEnd?: Arrowhead;
   }
 }
-FabricObject.customProperties = ['id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign'];
+FabricObject.customProperties = ['markdown', 'documentTitle', 'id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign'];
 Object.assign(FabricObject.ownDefaults, { originX: 'left', originY: 'top', transparentCorners: false, cornerColor: '#ffffff', cornerStrokeColor: '#3278ef', borderColor: '#3278ef', cornerSize: 8, touchCornerSize: 24, padding: 0, borderScaleFactor: 1, strokeUniform: true });
 
 let measuringContext: CanvasRenderingContext2D | null = null;
@@ -104,6 +106,39 @@ export class MuzeNote extends MuzeLabel {
   }
 }
 
+export class MuzeDocument extends MuzeNote {
+  static type = 'MuzeDocument';
+  constructor(text: string, options: Partial<Textbox> = {}) {
+    super(text, options);
+    if (this.fill === '#473e36') this.fill = '#202124';
+    if (this.stroke === '#473e36') this.stroke = '#202124';
+    this.markdown = options.markdown ?? text;
+    this.documentTitle = options.documentTitle || 'Document';
+    this.on('editing:exited', () => this.present());
+    this.present();
+  }
+  present() {
+    this.set({text: documentText(this.markdown || '', this.documentTitle), backgroundColor:documentColor(this.documentTitle || 'Document'), styles:{}});
+    // The filename is a quiet heading; Markdown remains intact in the source.
+    this.styles = {0:Object.fromEntries([...(this.documentTitle || 'Document')].map((_,i)=>[i,{fontSize:14,fontStyle:'italic',fill:'#606975'}]))};
+    const shown=this.text.split('\n'), raw=(this.markdown || '').split('\n');
+    raw.forEach((line,index)=>{
+      const row=index+2, heading=line.match(/^(#{1,6})\s/);
+      if(heading) this.styles[row]=Object.fromEntries([...(shown[row]||'')].map((_,i)=>[i,{fontSize:this.fontSize*(heading[1].length===1?1.25:1.1),fontWeight:600}]));
+      for(const match of line.matchAll(/\*\*([^*]+)\*\*/g)) {const start=shown[row]?.indexOf(match[1])??-1;if(start>=0){this.styles[row]||={};for(let i=start;i<start+match[1].length;i++)this.styles[row][i]={...this.styles[row][i],fontWeight:600};}}
+    });
+    this.initDimensions(); this.setCoords();
+  }
+  enterEditing(event?: TPointerEvent) {
+    this.set({text:this.markdown || '',styles:{}});this.initDimensions();
+    super.enterEditing(event);return this;
+  }
+  exitEditing() {
+    this.markdown = this.text;
+    super.exitEditing();this.canvas?.requestRenderAll();return this;
+  }
+}
+
 export class MuzeArrow extends Line {
   static type = 'MuzeArrow';
   lastControl?: 'start' | 'end' | 'bend';
@@ -187,4 +222,4 @@ export class MuzeArrow extends Line {
     return ['<g ', 'COMMON_PARTS', ` stroke-linecap="round" stroke-linejoin="round"><path d="M${a.x},${a.y}Q${control.x},${control.y} ${b.x},${b.y}" fill="none" stroke="${color}" stroke-width="${this.strokeWidth}"${this.strokeDashArray ? ` stroke-dasharray="${this.strokeDashArray.join(' ')}"` : ''}/>`, ...heads, '</g>'];
   }
 }
-for (const constructor of [MuzeArrow, MuzeText, MuzeLabel, MuzeNote]) classRegistry.setClass(constructor);
+for (const constructor of [MuzeArrow, MuzeText, MuzeLabel, MuzeNote, MuzeDocument]) classRegistry.setClass(constructor);

@@ -1,0 +1,9 @@
+{
+  "model": "muse-image-1.0",
+  "endpoint": "https://api.meta.ai/v1/images/edits",
+  "imagesGenerated": 1,
+  "costUsd": 0.01,
+  "reference": "https://about.fb.com/wp-content/uploads/2026/09/Introducing-Muse_-Personal-AI-Agent_SocialShare.jpg",
+  "processing": "Uniform crops, deterministic border-connected background removal and bounded color-gain normalization. Atlas references genuine frames [0,4,5,3,4,5,6,7,8]; upward-center uses neutral center because distinct upward poses were not returned. Runtime uses rigid easing, hysteresis and one visible pose at a time, with no stretching or crossfade.",
+  "generatedAt": "2026-11-01T03:48:44.307Z"
+}

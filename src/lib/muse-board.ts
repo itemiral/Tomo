@@ -1,4 +1,5 @@
 export type MuseActions = {
+  layout?: 'organic' | 'aligned';
   cards: { id: string; title: string; body: string }[];
   updates: { id: string; text: string; expectedText: string }[];
 };
@@ -12,7 +13,7 @@ export function boardContext(board: string, page: string, objects: Record<string
   const context: MuseBoard = { board: board.slice(0, 160), page: page.slice(0, 160), objects: [] };
   for (const object of objects.slice(0, 150)) {
     if (typeof object.id !== 'string') continue;
-    const text = typeof object.text === 'string' ? object.text : '';
+    const text = typeof object.markdown === 'string' ? object.markdown : typeof object.text === 'string' ? object.text : '';
     const item = { id: object.id.slice(0, 100), type: String(object.type).slice(0, 40), text: text.slice(0, 4000), editable: textTypes.has(String(object.type)) && !object.isLocked && !object.labelFor && text.length <= 4000 };
     context.objects.push(item);
     if (JSON.stringify(context).length > 35_000) { context.objects.pop(); break; }

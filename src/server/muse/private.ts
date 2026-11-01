@@ -3,6 +3,7 @@ import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { ensureMuse, MuseStoreError, readMuseIcon, readMuseNote, saveMuseIcon, saveMuseNote, validNoteKey } from '../../../scripts/muse-store.mjs';
+import { readAvatar, avatarSummary } from '../../../scripts/muse-avatar.mjs';
 import { PrivateError } from './error';
 export { PrivateError } from './error';
 export type NoteKey = 'soul' | 'memory';
@@ -54,7 +55,7 @@ export async function publicProfile(profile: Profile) {
   const user = await currentUser();
   if (!user || user.id !== profile.ownerId) throw new PrivateError(401, 'Sign in to open your Muse.');
   const identity = await ensureMuse(profile.ownerId), icon = await readMuseIcon(profile.ownerId);
-  return { ownerId: profile.ownerId, ownerName: user.firstName || user.username || 'You', muse: { ...identity, iconVersion: icon?.version || null } };
+  return { ownerId: profile.ownerId, ownerName: user.firstName || user.username || 'You', muse: { ...identity, iconVersion: icon?.version || null, ...avatarSummary(await readAvatar(profile.ownerId)) } };
 }
 export async function avatar(profile: Profile) {
   const icon = await readMuseIcon(profile.ownerId);

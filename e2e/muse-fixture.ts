@@ -26,7 +26,12 @@ function fixtureBundle() {
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
 export async function museFixture(page: Page) {
   const assets = await fixtureBundle();
+  const defaultAvatar='data:image/png;base64,'+(await readFile('public/muse/default-avatar.png')).toString('base64');
   let owner = 'owner-a', turn = 0, icon: string | null = null;
+  const boards = new Map<string, {cards: unknown[]; comments: unknown[]; revision: string}>();
+  let generated = false, activated = false;
+  let beforeCanvasSave=async()=>{};
+  const canvases = new Map<string, {board:any;revision:string;notes:Record<string,string>}>();
   const notes = new Map<string, { content: string; revision: string; updatedAt: number }>();
   const history = new Map<string, Message[]>();
   let respond: (body: { message: string; board: string }) => Promise<MuseActions> = async () => ({ cards: [
@@ -40,7 +45,29 @@ export async function museFixture(page: Page) {
   await page.route('**/api/muse/**', async route => {
     const req = route.request(), url = new URL(req.url()), key = url.pathname.split('/').at(-1)!;
     const ownerAtRequest = owner;
-    if (key === 'session') return route.fulfill({ json: { ownerId: owner, ownerName: owner === 'owner-a' ? 'First owner' : 'Second owner', muse: { id: owner + '-muse', name: 'Muse', iconVersion: icon ? 'test-icon' : null } } });
+    if (key === 'session') return route.fulfill({ json: { ownerId: owner, ownerName: owner === 'owner-a' ? 'First owner' : 'Second owner', muse: { id: owner + '-muse', name: 'Muse', iconVersion: icon ? 'test-icon' : null, gazeVersion: activated ? 'gaze-test' : null, candidateVersion: generated ? 'gaze-test' : null } } });
+    if (key === 'canvas') {
+      if(!canvases.has(owner)) {
+        const documents=['soul','memory'].map((key,i)=>{
+          const id=owner+':'+key;if(!notes.has(id))notes.set(id,{content:'# '+key+'\n\nA few things about me.',revision:'initial',updatedAt:Date.now()});
+          return {type:'MuzeDocument',id:'muse-file-'+key,markdown:notes.get(id)!.content,documentTitle:key+'.md',text:notes.get(id)!.content,left:220+i*530,top:190+i*80,width:430,boxHeight:360,inset:28,angle:i?2:-2,fontFamily:'IBM Plex Sans',fontSize:20,fill:'#202124',backgroundColor:'#ffffff',strokeWidth:0,verticalAlign:'top'};
+        });
+        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muse Board',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
+      }
+      const current=canvases.get(owner)!;
+      if(req.method()==='PUT') {
+        await beforeCanvasSave();
+        const body=req.postDataJSON();if(body.revision!==current.revision)return route.fulfill({status:409,json:{error:'This notebook changed elsewhere.'}});
+        for(const key of ['soul','memory']) {
+          const note=notes.get(owner+':'+key)!;if(body.notes[key]!==note.revision)return route.fulfill({status:409,json:{error:key+'.md changed elsewhere.'}});
+          let doc:any;const walk=(objects:any[])=>objects.forEach(o=>{if(o.id==='muse-file-'+key)doc=o;if(o.objects)walk(o.objects)});body.board.pages.forEach((p:any)=>walk(p.objects));
+          if(doc){const revision='revision-'+ ++turn;notes.set(owner+':'+key,{content:doc.markdown??doc.text,revision,updatedAt:Date.now()});body.notes[key]=revision;}
+        }
+        canvases.set(owner,{...body,revision:'canvas-'+ ++turn});
+      }
+      const result=canvases.get(owner)!;return route.fulfill({json:req.method()==='PUT'?{revision:result.revision,notes:result.notes}:result});
+    }
+    if (key === 'board') { if (!boards.has(owner)) boards.set(owner, {cards: [], comments: [], revision: 'initial'}); if(req.method()==='PUT') boards.set(owner, {...req.postDataJSON(), revision: 'rev-'+ ++turn}); return route.fulfill({json: boards.get(owner)}); }
     if (key === 'soul' || key === 'memory') {
       const id = owner + ':' + key;
       if (!notes.has(id)) notes.set(id, { content: '# ' + (key === 'soul' ? 'Soul' : 'Memory') + '\n\nDefault template for ' + owner, revision: 'initial', updatedAt: Date.now() });
@@ -53,8 +80,10 @@ export async function museFixture(page: Page) {
       return route.fulfill({ json: { key, ...notes.get(id) } });
     }
     if (key === 'avatar') {
-      if (req.method() === 'PUT') { icon = req.postDataJSON().image; return route.fulfill({ json: { iconVersion: 'test-icon' } }); }
-      return route.fulfill({ contentType: 'image/png', body: Buffer.from(icon!.split(',')[1], 'base64') });
+      if(req.method()==='POST') {generated=true;return route.fulfill({json:{candidateVersion:'gaze-test',gazeVersion:null}});}
+      if(req.method()==='PUT' && req.postDataJSON().action==='activate') {activated=true;return route.fulfill({json:{gazeVersion:'gaze-test',candidateVersion:'gaze-test'}});}
+      if (req.method() === 'PUT') { icon = req.postDataJSON().source || req.postDataJSON().image; return route.fulfill({ json: { iconVersion: 'test-icon' } }); }
+      return route.fulfill({ contentType: 'image/png', body: Buffer.from((icon||defaultAvatar).split(',')[1], 'base64') });
     }
     if (key === 'chat') {
       const body = req.method() === 'POST' ? req.postDataJSON() : null;
@@ -69,9 +98,10 @@ export async function museFixture(page: Page) {
   });
   await page.goto('/__muse-fixture');
   await expect(page.getByRole('main', { name: 'Muse Board' })).toHaveAttribute('data-ready', 'true');
-  await expect(page.getByRole('button', { name: 'Talk to Muse' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Muse' })).toBeVisible();
   return {
-    notes,
+    notes, canvases,
+    canvasSave: (handler:()=>Promise<void>)=>{beforeCanvasSave=handler;},
     response: (callback: typeof respond) => { respond = callback; },
     owner: async (value: string) => { owner = value; await page.evaluate(value => { (window as unknown as { fixtureOwner: string }).fixtureOwner = value; window.dispatchEvent(new Event('fixture-owner')); }, value); },
   };
@@ -82,7 +112,7 @@ export async function exported(page: Page) {
   await page.getByRole('menuitem', { name: 'Muse Board file', exact: true }).click();
   const text = await readFile((await (await pending).path())!, 'utf8');
   const data = JSON.parse(text);
-  return { text, objects: data.board.pages.find((page: { id: string }) => page.id === data.board.activePage).objects as { id: string; text: string; left: number; top: number; width: number; height: number }[], viewport: data.board.pages[0].viewport as number[] };
+  return { text, objects: data.board.pages.find((page: { id: string }) => page.id === data.board.activePage).objects as { type: string; markdown?:string; id: string; text: string; left: number; top: number; width: number; height: number }[], viewport: data.board.pages[0].viewport as number[] };
 }
-export async function chat(page: Page) { await page.getByRole('button', { name: 'Talk to Muse' }).click(); await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled(); }
+export async function chat(page: Page) { await page.getByRole('textbox', { name: 'Message Muse', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled(); }
 export async function send(page: Page, text = 'Help me plan a project') { await page.getByRole('textbox', { name: 'Message Muse' }).fill(text); await page.getByRole('button', { name: 'Send to Muse' }).click(); }

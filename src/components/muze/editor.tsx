@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlignCenter, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, ArrowDownToLine, ArrowUpRight, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Hexagon, Heart, Cloud, LockKeyhole, UnlockKeyhole, FlipHorizontal2, FlipVertical2, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Scissors, Clipboard, Magnet, Bold, Italic, Underline, BringToFront, Check, ChevronDown, ChevronUp, Circle, Copy, Diamond, Eraser, FilePlus2, FolderOpen, Frame, Grid2X2, Group, Hand, Highlighter, ImagePlus, Keyboard, Layers, Maximize, Menu, Minus, MoreHorizontal, MousePointer2, MoveUpRight, Pencil, Plus, Redo2, SendToBack, Settings2, Share2, Square, SquareDashed, Star, StickyNote, Sun, Moon, Trash2, Triangle, Type, Undo2, Ungroup, X, Zap } from 'lucide-react';
+import { AlignCenter, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, ArrowDownToLine, ArrowUpRight, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Hexagon, Heart, Cloud, LockKeyhole, UnlockKeyhole, FlipHorizontal2, FlipVertical2, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Scissors, Clipboard, Magnet, Bold, Italic, Underline, BringToFront, Check, ChevronDown, ChevronUp, Circle, Copy, Diamond, Eraser, FilePlus2, FolderOpen, Frame, Grid2X2, Group, Hand, Highlighter, ImagePlus, Keyboard, Layers, Maximize, Menu, Minus, MessageCircle, MoreHorizontal, MousePointer2, MoveUpRight, Pencil, Plus, Redo2, SendToBack, Settings2, Share2, Square, SquareDashed, Star, StickyNote, Sun, Moon, Trash2, Triangle, Type, Undo2, Ungroup, X, Zap } from 'lucide-react';
 import { WhiteboardEngine, INITIAL_EDITOR, INITIAL_PAINT, type EditorState, type Paint, type Tool } from './engine';
 import { download, filename, newBoard, newPage, openStorage, parseBoardFile, readStorage, saveStorage, type Board, type Drawing, type Workspace } from './storage';
 import { Point } from 'fabric';
@@ -11,11 +11,15 @@ import { gridPattern } from './grid';
 import { MIN_ZOOM, MAX_ZOOM } from './zoom';
 import { createSaveFeedback } from './save-feedback';
 import './whiteboard.css';
+import { UserButton, useUser } from '@clerk/nextjs';
+import { CanvasComments } from './comments';
+import { useMuseCanvas } from '../muse/use-muse-canvas';
 import { MuseCompanion } from '../muse/companion';
 import { SignInToShare } from '../muse/sign-in';
 import { boardContext as makeBoardContext } from '@/lib/muse-board';
 
 const TOOLS: Record<Tool, { name: string; icon: typeof MousePointer2; key: string; hint: string }> = {
+  comment: { name:'Comment', icon:MessageCircle, key:'C', hint:'Click a spot on the canvas to leave a comment.' },
   select: { name: 'Select', icon: MousePointer2, key: 'V', hint: 'Move, resize, rotate, or select several objects.' },
   hand: { name: 'Hand', icon: Hand, key: 'H', hint: 'Grab the canvas and move around. You can also hold Space.' },
   draw: { name: 'Draw', icon: Pencil, key: 'D', hint: 'Sketch a freehand line with your mouse or pen.' },
@@ -93,14 +97,22 @@ function Minimap({ editor, navigate }: { editor: EditorState; navigate: (point: 
 }
 
 export default function MuzeEditor() {
+  const { isSignedIn, user } = useUser();
+  const museCanvas = useMuseCanvas(isSignedIn ? user?.id : undefined);
+  const privateBoardRef = useRef<Board | null>(null); privateBoardRef.current = museCanvas.board;
   const [museOpen, setMuseOpen] = useState(false);
+  const [appearanceRequest,setAppearanceRequest]=useState(0);
+  const [chatRequest, setChatRequest] = useState(0);
   const museActive = useRef(false); museActive.current = museOpen;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null), engine = useRef<WhiteboardEngine | null>(null);
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
   const updateEditor = useCallback((value: EditorState) => { setEditor(value); setPaint(value.paint); }, []);
+  const [dockHeight,setDockHeight]=useState(58);
   const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(false), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
   const [toast, setToast] = useState(''), [contextPoint, setContextPoint] = useState({ x: 0, y: 0 });
+  const [commentPlacement,setCommentPlacement]=useState<{x:number;y:number;nonce:number}|null>(null);
+  const [renameDocument,setRenameDocument]=useState<{id:string;title:string}|null>(null);
   const [name, setName] = useState('Untitled board');
   const boardInput = useRef<HTMLInputElement>(null), imageInput = useRef<HTMLInputElement>(null);
   const saveFeedback = useRef<ReturnType<typeof createSaveFeedback> | null>(null);
@@ -126,35 +138,52 @@ export default function MuzeEditor() {
     const database = db.current;
     void saveFeedback.current?.track(() => database ? saveStorage(database, next) : Promise.reject(new Error('Local storage is unavailable.')), next.activeBoard);
   }, []);
-  const active = workspace?.boards.find(board => board.id === workspace.activeBoard);
+  const ordinary = workspace?.boards.find(board => board.id === workspace.activeBoard);
+  const active = museOpen ? museCanvas.board : ordinary;
   const page = active?.pages.find(item => item.id === active.activePage);
   useEffect(() => { if (active) setName(active.name); }, [active?.id, active?.name]);
   const updateBoard = useCallback((update: (board: Board) => Board) => {
+    if (museActive.current) { museCanvas.update(update); return; }
     const value = current.current; if (!value) return;
     commit({ ...value, boards: value.boards.map(board => board.id === value.activeBoard ? update(board) : board) });
-  }, [commit]);
+  }, [commit, museCanvas.update]);
   const changeDrawing = useCallback((drawing: Drawing) => updateBoard(board => ({ ...board, pages: board.pages.map(p => p.id === board.activePage ? { ...p, ...drawing } : p) })), [updateBoard]);
-  const mount = useCallback((value: WhiteboardEngine | null) => { engine.current = value; if (value) { value.setEnabled(!museActive.current); value.paint = { ...INITIAL_PAINT }; value.setDark(dark); value.grid = grid; setPaint(INITIAL_PAINT); } }, [dark, grid]);
-  useEffect(() => { engine.current?.setEnabled(!museOpen); if (museOpen) { setPopup(null); setStylesOpen(false); } }, [museOpen]);
+  const mount = useCallback((value: WhiteboardEngine | null) => { engine.current = value; if (value) { value.onComment=point=>setCommentPlacement({...point,nonce:Date.now()}); value.setEnabled(true); value.paint = { ...INITIAL_PAINT }; value.setDark(dark); value.grid = grid; setPaint(INITIAL_PAINT); } }, [dark, grid]);
+  useEffect(() => { setPopup(null); setStylesOpen(false); }, [museOpen]);
+  useEffect(() => { setMuseOpen(false); }, [user?.id]);
   useEffect(() => { engine.current?.setDark(dark); }, [dark]);
   useEffect(() => { if (engine.current) engine.current.grid = grid; }, [grid]);
-  const chooseTool = (tool: Tool) => { engine.current?.setTool(tool); setPopup(null); };
+  useEffect(()=>{if(museOpen&&editor.ready&&appearanceRequest){if(engine.current?.focusAppearance())setAppearanceRequest(0);}},[museOpen,editor.ready,appearanceRequest]);
+  useEffect(()=>{
+    if(popup!=='tools')return;
+    const trigger=document.querySelector<HTMLButtonElement>('[data-more-trigger]'),panel=document.querySelector<HTMLElement>('.muze-more-tools');
+    const outside=(event:PointerEvent)=>{if(!(event.target as Element).closest('.muze-toolbar-dock')&&!panel?.contains(event.target as Node)&&!trigger?.contains(event.target as Node))setPopup(null);};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setPopup(null);trigger?.focus();}};
+    document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);panel?.querySelector<HTMLButtonElement>('button')?.focus();
+    return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);};
+  },[popup]);
+  useEffect(()=>{const dock=document.querySelector('.muze-toolbar-dock');if(!dock)return;const observer=new ResizeObserver(()=>setDockHeight(dock.getBoundingClientRect().height));observer.observe(dock);return()=>observer.disconnect();},[editor.ready,active?.id,page?.id]);
+  const chooseTool = (tool: Tool) => { engine.current?.setTool(tool); setPopup(null); setChatRequest(value=>value-1); };
   const applyPaint = (patch: Partial<Paint>) => { setPaint(value => ({ ...value, ...patch })); engine.current?.applyPaint(patch); };
   const togglePopup = (value: Popup) => setPopup(p => p === value ? null : value);
-  function createBoard() { const board = newBoard(); const value = current.current!; commit({ ...value, activeBoard: board.id, boards: [board, ...value.boards] }); setPopup(null); }
-  function createPage(copy = false) { updateBoard(board => { const source = board.pages.find(p => p.id === board.activePage)!; const next = copy ? { ...structuredClone(source), id: crypto.randomUUID(), name: source.name + ' copy' } : newPage('Page ' + (board.pages.length + 1)); return { ...board, activePage: next.id, pages: [...board.pages, next] }; }); setPopup(null); }
-  function saveFile() { const board = current.current?.boards.find(b => b.id === current.current?.activeBoard); if (!board) return; download(new Blob([JSON.stringify({ format: 'muze', version: 1, board })], { type: 'application/json' }), filename(board.name) + '.muze'); setPopup(null); }
+  function createBoard() { setMuseOpen(false); const board = newBoard(); const value = current.current!; commit({ ...value, activeBoard: board.id, boards: [board, ...value.boards] }); setPopup(null); }
+  function createPage(copy = false) { updateBoard(board => { const source = board.pages.find(p => p.id === board.activePage)!; const next = copy ? { ...structuredClone(source), id: crypto.randomUUID(), name: source.name + ' copy' } : newPage('Page ' + (board.pages.length + 1)); return { ...board, activePage: next.id, pages: [...board.pages, museActive.current && copy ? {...next,objects:next.objects.map(object=>({...object,...(String(object.id).startsWith('muse-file-')?{id:crypto.randomUUID()}: {})}))} : next] }; }); setPopup(null); }
+  function saveFile() { const board = museActive.current ? privateBoardRef.current : current.current?.boards.find(b => b.id === current.current?.activeBoard); if (!board) return; download(new Blob([JSON.stringify({ format: 'muze', version: 1, board })], { type: 'application/json' }), filename(board.name) + '.muze'); setPopup(null); }
   async function openFile(file: File) {
     try {
       if (file.size > 50_000_000) throw new Error('Choose a board file smaller than 50 MB.');
-      const board = parseBoardFile(await file.text()); const value = current.current!;
+      const board = parseBoardFile(await file.text());
+      if (museActive.current) {
+        const pageIds=new Map(board.pages.map(page=>[page.id,crypto.randomUUID()]));
+        updateBoard(value => ({...value,pages:[...value.pages,...board.pages.map(page=>({...page,id:pageIds.get(page.id)!}))],comments:[...(value.comments||[]),...(board.comments||[]).map(comment=>({...comment,id:crypto.randomUUID(),pageId:pageIds.get(comment.pageId||board.pages[0].id)}))]}));setPopup(null);return;
+      }
+      const value = current.current!;
       commit({ ...value, activeBoard: board.id, boards: [board, ...value.boards] }); setPopup(null);
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not open that board.'); }
   }
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (museActive.current) return;
-      if (event.key === 'Escape') { setPopup(null); setStylesOpen(false); }
+      if (event.key === 'Escape') { setRenameDocument(null); setPopup(null); setStylesOpen(false); }
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === 's') { event.preventDefault(); saveFile(); }
       if (event.key.toLowerCase() === 'u') { event.preventDefault(); imageInput.current?.click(); }
@@ -163,6 +192,14 @@ export default function MuzeEditor() {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, []);
 
+  async function acceptFile(file: File) {
+    if (['image/png','image/jpeg','image/webp','image/gif','image/svg+xml'].includes(file.type)) { const added=await engine.current?.addImage(file); if(added && museActive.current)setToast('Picture added locally. Muse receives its type and position, not its pixels. Add a caption for meaning.'); }
+    else if (/\.(md|txt)$/i.test(file.name)) { if(file.size>24000){setToast('Choose a text file under 24 KB.');return;}const text=await file.text();if(text.includes('\0')){setToast('That file is not readable text.');return;}engine.current?.addDocument(text,file.name); }
+    else if (/\.(muze|json)$/i.test(file.name)) await openFile(file);
+    else setToast('This file type is not supported. Add a picture, Markdown, text, or Muse Board file. Audio, video and PDFs need a written description.');
+  }
+  const leaveMuse = () => { void museCanvas.flush().then(()=>setMuseOpen(false)).catch(()=>{}); };
+  if (museOpen && (!active || !page)) return <main className="muze-loading"><span>{museCanvas.error || 'Opening your Muse’s notebook…'}</span><button onClick={()=>setMuseOpen(false)}>Back to whiteboard</button></main>;
   if (!workspace || !active || !page) return <main className="muze-loading"><span>Muse Board</span><i/>{toast && <p role="alert">{toast}</p>}</main>;
   const gridDots = gridPattern(editor.zoom, editor.viewport[4], editor.viewport[5]);
   const selected = editor.selected > 0;
@@ -172,7 +209,9 @@ export default function MuzeEditor() {
   const arrowStyles = editor.selectionKind === 'arrow' || editor.tool === 'arrow';
   const run = (action: () => void) => { action(); setPopup(null); };
   const menuItem = (label: string, icon: ReactNode, action: () => void, shortcut?: string, disabled = false) => <button role="menuitem" className="muze-menu-item" onClick={() => run(action)} disabled={disabled}>{icon}<span>{label}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
+  const selectedDocument=engine.current?.selectedDocument();
   const actions = <>
+    {selectedDocument && !selectedDocument.canonical && menuItem('Rename document',<Pencil/>,()=>setRenameDocument(selectedDocument))}
     {menuItem('Cut', <Scissors/>, () => { void engine.current?.copy(true, true); }, '⌘ X', !selected)}
     {menuItem('Copy', <Copy/>, () => { void engine.current?.copy(false, true); }, '⌘ C', !selected)}
     {menuItem('Paste', <Clipboard/>, () => { void engine.current?.paste(); }, '⌘ V')}
@@ -191,26 +230,26 @@ export default function MuzeEditor() {
     {menuItem('Lock / unlock', <LockKeyhole/>, () => engine.current?.lockSelection(), '⌘ ⇧ L', !selected)}
     <div className="muze-menu-rule"/>{menuItem('Delete', <Trash2/>, () => engine.current?.remove(), '⌫', !selected)}
   </>;
-  return <main className={'muze-app' + (dark ? ' muze-dark' : '')} aria-label="Muse Board" data-ready={editor.ready} aria-busy={!editor.ready}
+  return <main className={'muze-app' + (dark ? ' muze-dark' : '') + (museOpen ? ' muse-journal' : '')} style={{'--toolbar-height':dockHeight+'px'} as React.CSSProperties} aria-label="Muse Board" data-muse-board={museOpen} data-ready={editor.ready} aria-busy={!editor.ready}
     onPointerDown={event => { if (!(event.target as HTMLElement).closest('button,input,select,.muze-popover,.muze-style-panel')) setPopup(null); }}
-    onContextMenuCapture={event => { if (museOpen || (event.target as HTMLElement).closest('[data-muse-ui]')) return; event.preventDefault(); const target = engine.current?.canvas.findTarget(event.nativeEvent).target; if (target) engine.current?.canvas.setActiveObject(target); setContextPoint({ x: Math.min(event.clientX, window.innerWidth - 242), y: Math.min(event.clientY, window.innerHeight - 310) }); setPopup('context'); }}
-    onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (museOpen) return; const file = event.dataTransfer.files[0]; if (file?.type.startsWith('image/')) void engine.current?.addImage(file); else if (file) void openFile(file); }}>
-    <div className="muze-board-layer" inert={museOpen} aria-hidden={museOpen} style={{ visibility: museOpen ? 'hidden' : 'visible' }}>
+    onContextMenuCapture={event => { if ((event.target as HTMLElement).closest('[data-muse-ui]')) return; event.preventDefault(); const target = engine.current?.canvas.findTarget(event.nativeEvent).target; if (target) engine.current?.canvas.setActiveObject(target); setContextPoint({ x: Math.min(event.clientX, window.innerWidth - 242), y: Math.min(event.clientY, window.innerHeight - 310) }); setPopup('context'); }}
+    onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); const files=Array.from(event.dataTransfer.files); if(files.length) {void (async()=>{for(const file of files)await acceptFile(file);})();} else {const text=event.dataTransfer.getData('text/plain');if(text)engine.current?.addMuseText(text);else setToast('This drop could not be read. Add an image or a written description.');} }}>
+    <div className="muze-board-layer">
     {grid && <svg className="muze-grid" aria-hidden="true"><defs><pattern id="muze-grid-dots" patternUnits="userSpaceOnUse" x={gridDots.x} y={gridDots.y} width={gridDots.spacing} height={gridDots.spacing}><circle cx={gridDots.spacing / 2} cy={gridDots.spacing / 2} r="1" fill="var(--grid-dot)"/></pattern></defs><rect width="100%" height="100%" fill="url(#muze-grid-dots)"/></svg>}
     <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>
     {editor.guides.length > 0 && <svg className="muze-snap-guides" aria-hidden="true"><g transform={`translate(${editor.viewport[4]} ${editor.viewport[5]}) scale(${editor.zoom})`}>{editor.guides.map((line, index) => <line key={index} {...line} stroke="#e44b7a" strokeWidth={1 / editor.zoom} strokeDasharray={`${4 / editor.zoom} ${4 / editor.zoom}`}/>)}</g></svg>}
     <header className="muze-header">
       <div className="muze-project">
-        <span className="muze-brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V6l8 8 8-8v12"/></svg><span>Muse Board</span></span>
-        <Button label="Main menu" onClick={() => togglePopup('menu')} active={popup === 'menu'}><Menu size={17}/></Button>
+        <span className="muze-brand"><span>Muse Board</span></span>
+        {museOpen && <Button label="Back to whiteboard" onClick={leaveMuse}><ArrowLeft size={17}/></Button>}<Button label="Main menu" onClick={() => togglePopup('menu')} active={popup === 'menu'}><Menu size={17}/></Button>
         <span className="muze-divider"/>
         <input aria-label="Board name" value={name} maxLength={160} onChange={event => setName(event.target.value)} onFocus={event => event.target.select()} onBlur={() => updateBoard(board => ({ ...board, name: name.trim() || 'Untitled board' }))} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }}/>
         <button className="muze-page-trigger" aria-label="Pages" onClick={() => togglePopup('pages')}><span>{page.name}</span><ChevronDown size={14}/></button>
       </div>
       <div className="muze-header-right">
         <Button label="Share" hint="Export an image or board file to share." active={popup === 'export'} className="muze-share" onClick={() => togglePopup('export')}><Share2 size={18} strokeWidth={1.7}/></Button>
-        <Button label="Styles" className="muze-mobile-styles" onClick={() => setStylesOpen(!stylesOpen)}><Settings2 size={19}/></Button>
-        <SignInToShare/>
+        <Button label="Styles" className="muze-open-styles" onClick={() => setStylesOpen(!stylesOpen)}><Settings2 size={19}/></Button>
+        <SignInToShare/>{isSignedIn && <UserButton/>}
       </div>
     </header>
 
@@ -232,8 +271,9 @@ export default function MuzeEditor() {
     </aside>
 
     <div className="muze-toolbar-dock">
-      <div className="muze-quick-actions"><Button label="Lock current tool" shortcut="Q" hint="Keep using the same tool after creating a shape." active={editor.locked} onClick={() => engine.current?.toggleToolLock()}>{editor.locked ? <LockKeyhole size={15}/> : <UnlockKeyhole size={15}/>}</Button><Button label="Undo" shortcut="⌘ Z" disabled={!editor.canUndo} onClick={() => { void engine.current?.undo(); }}><Undo2 size={16}/></Button><Button label="Redo" shortcut="⌘ ⇧ Z" disabled={!editor.canRedo} onClick={() => { void engine.current?.undo(true); }}><Redo2 size={16}/></Button><Button label="Delete selected" disabled={!selected} onClick={() => engine.current?.remove()}><Trash2 size={16}/></Button><Button label="Duplicate selected" disabled={!selected} onClick={() => { void engine.current?.duplicate(); }}><Copy size={16}/></Button><span className="muze-divider"/><Button label="Selection actions" active={popup === 'actions'} onClick={() => togglePopup('actions')}><MoreHorizontal size={17}/></Button></div>
-      <div className="muze-tools" role="toolbar" aria-label="Whiteboard tools"><div className="muze-tools-scroll">{PRIMARY.map(tool => <ToolButton key={tool} tool={tool} current={editor.tool} choose={chooseTool}/>)}<Button label="Add image" hint="Choose an image or drag one onto the canvas." onClick={() => imageInput.current?.click()}><ImagePlus size={20} strokeWidth={1.65}/></Button><ToolButton tool="highlight" current={editor.tool} choose={chooseTool}/><ToolButton tool="draw" current={editor.tool} choose={chooseTool}/></div><Button label="More tools" active={popup === 'tools'} onClick={() => togglePopup('tools')}><ChevronUp size={17}/></Button></div>
+      {(selected || editor.locked) && <div className="muze-quick-actions"><Button label="Lock current tool" shortcut="Q" hint="Keep using the same tool after creating a shape." active={editor.locked} onClick={() => engine.current?.toggleToolLock()}>{editor.locked ? <LockKeyhole size={15}/> : <UnlockKeyhole size={15}/>}</Button>{selected && <><Button label="Delete selected" disabled={!selected} onClick={() => engine.current?.remove()}><Trash2 size={16}/></Button><Button label="Duplicate selected" disabled={!selected} onClick={() => { void engine.current?.duplicate(); }}><Copy size={16}/></Button><span className="muze-divider"/><Button label="Selection actions" active={popup === 'actions'} onClick={() => togglePopup('actions')}><MoreHorizontal size={17}/></Button></>}</div>}
+    {popup === 'tools' && <div className="muze-popover muze-more-tools" data-muse-ui="true" onKeyDown={event=>{event.stopPropagation();const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];const index=buttons.indexOf(document.activeElement as HTMLButtonElement);const delta:Record<string,number>={ArrowRight:2,ArrowLeft:-2,ArrowDown:1,ArrowUp:-1};if(delta[event.key]){event.preventDefault();buttons[(index+delta[event.key]+buttons.length)%buttons.length]?.focus();}}} role="toolbar" aria-label="More drawing tools">{MORE.map(tool => <div key={tool}><ToolButton tool={tool} current={editor.tool} choose={chooseTool}/><span>{TOOLS[tool].name}</span></div>)}<div><Button label="Add image" onClick={() => { imageInput.current?.click(); setPopup(null); }}><ImagePlus size={20}/></Button><span>Image</span></div><div><Button label="Add document" onClick={()=>{engine.current?.addDocument();setPopup(null);}}><FilePlus2 size={20}/></Button><span>Document</span></div><div><Button label="Import document" hint="Import a Markdown or text file under 24 KB. Images remain local." onClick={()=>{boardInput.current?.click();setPopup(null);}}><FolderOpen size={20}/></Button><span>Import</span></div>{!selected && !editor.canUndo && !editor.canRedo && <div><Button label="Lock current tool" onClick={()=>{engine.current?.toggleToolLock();setPopup(null);}}>{editor.locked?<LockKeyhole size={18}/>:<UnlockKeyhole size={18}/>}</Button><span>Tool lock</span></div>}</div>}
+      <div className="muze-tools" role="toolbar" aria-label="Whiteboard tools"><ToolButton tool="select" current={editor.tool} choose={chooseTool}/><div className="muze-tools-scroll">{PRIMARY.filter(tool => tool !== 'select').map(tool => <ToolButton key={tool} tool={tool} current={editor.tool} choose={chooseTool}/>)}<ToolButton tool="draw" current={editor.tool} choose={chooseTool}/><ToolButton tool="comment" current={editor.tool} choose={chooseTool}/></div><Button data-more-trigger="true" aria-haspopup="true" aria-expanded={popup==='tools'} label="More tools" active={popup === 'tools'} onClick={() => togglePopup('tools')}><ChevronUp size={17}/></Button></div>
     </div>
     <div className="muze-navigation"><button className="muze-zoom-label" aria-label="Zoom" onClick={() => togglePopup('zoom')}>{Math.round(editor.zoom * 100)}%</button><Button label="Zoom out" disabled={editor.zoom <= MIN_ZOOM} onClick={() => engine.current?.zoom(editor.zoom / 1.2)}><Minus size={14}/></Button><Button label="Zoom in" disabled={editor.zoom >= MAX_ZOOM} onClick={() => engine.current?.zoom(editor.zoom * 1.2)}><Plus size={14}/></Button><Button label="Fit to content" shortcut="⇧ 1" onClick={() => engine.current?.fit()}><Maximize size={15}/></Button><Button label="Toggle minimap" active={minimap} onClick={() => setMinimap(!minimap)}><Layers size={15}/></Button></div>
     <div className="muze-bottom-right"><Button label="Toggle grid" active={grid} onClick={() => { setGrid(!grid); localStorage.setItem('muze.grid', String(!grid)); }}><Grid2X2 size={16}/></Button><Button label="Keyboard shortcuts" onClick={() => togglePopup('shortcuts')}><Keyboard size={17}/></Button></div>
@@ -242,23 +282,26 @@ export default function MuzeEditor() {
 
     {popup === 'menu' && <div className="muze-popover muze-main-menu" role="menu" aria-label="Main menu">
       {menuItem('New board', <FilePlus2/>, createBoard)}{menuItem('Open board file…', <FolderOpen/>, () => boardInput.current?.click(), '⌘ O')}{menuItem('Save a copy…', <ArrowDownToLine/>, saveFile, '⌘ S')}
-      <div className="muze-menu-rule"/><p className="muze-menu-heading">Your boards</p><div className="muze-board-list">{workspace.boards.map(board => <button key={board.id} role="menuitem" className="muze-menu-item" onClick={() => { commit({ ...current.current!, activeBoard: board.id }); setPopup(null); }}><Square size={15}/><span>{board.name}</span>{board.id === active.id && <Check size={14}/>}</button>)}</div>
+      <div className="muze-menu-rule"/><p className="muze-menu-heading">Your boards</p><div className="muze-board-list">{workspace.boards.map(board => <button key={board.id} role="menuitem" className="muze-menu-item" onClick={() => { setMuseOpen(false); commit({ ...current.current!, activeBoard: board.id }); setPopup(null); }}><Square size={15}/><span>{board.name}</span>{board.id === active.id && <Check size={14}/>}</button>)}</div>
       <div className="muze-menu-rule"/>{menuItem(dark ? 'Light canvas' : 'Dark canvas', dark ? <Sun/> : <Moon/>, () => { setDark(!dark); localStorage.setItem('muze.theme', dark ? 'light' : 'dark'); })}{menuItem(editor.snap ? 'Turn off snapping' : 'Snap to shapes', <Magnet/>, () => engine.current?.toggleSnap())}{menuItem('Keyboard shortcuts', <Keyboard/>, () => setTimeout(() => setPopup('shortcuts'), 0))}
     </div>}
     {popup === 'pages' && <div className="muze-popover muze-pages" role="menu" aria-label="Pages"><p className="muze-menu-heading">Pages</p>{active.pages.map(p => <div key={p.id} className={'muze-page-row' + (p.id === page.id ? ' current' : '')}><button aria-label={'Open ' + p.name} onClick={() => { updateBoard(board => ({ ...board, activePage: p.id })); setPopup(null); }}><Square size={15}/></button><input aria-label={'Rename ' + p.name} value={p.name} maxLength={80} onChange={event => updateBoard(board => ({ ...board, pages: board.pages.map(item => item.id === p.id ? { ...item, name: event.target.value } : item) }))} onKeyDown={event => { if (event.key === 'Enter') { updateBoard(board => ({ ...board, activePage: p.id })); setPopup(null); } }}/>{p.id === page.id && <Check size={14}/>}</div>)}<div className="muze-menu-rule"/>{menuItem('New page', <Plus/>, () => createPage())}{menuItem('Duplicate page', <Copy/>, () => createPage(true))}</div>}
     {popup === 'export' && <div className="muze-popover muze-export-menu" role="menu" aria-label="Export board">{menuItem('Muse Board file', <FolderOpen/>, saveFile)}{menuItem('Export as PNG', <ImagePlus/>, () => engine.current?.export('png', active.name))}{menuItem('Export as SVG', <MoveUpRight/>, () => engine.current?.export('svg', active.name))}</div>}
-    {popup === 'tools' && <div className="muze-popover muze-more-tools" role="toolbar" aria-label="More drawing tools">{MORE.map(tool => <div key={tool}><ToolButton tool={tool} current={editor.tool} choose={chooseTool}/><span>{TOOLS[tool].name}</span></div>)}<div><Button label="Add image" onClick={() => { imageInput.current?.click(); setPopup(null); }}><ImagePlus size={20}/></Button><span>Image</span></div></div>}
     {popup === 'actions' && <div className="muze-popover muze-actions-menu" role="menu" aria-label="Selection actions">{actions}</div>}
     {popup === 'context' && <div className="muze-popover muze-context-menu" role="menu" style={{ left: contextPoint.x, top: contextPoint.y }}>{actions}</div>}
     {popup === 'zoom' && <div className="muze-popover muze-zoom-menu" role="menu">{menuItem('Zoom in', <Plus/>, () => engine.current?.zoom(editor.zoom * 1.2), '+', editor.zoom >= MAX_ZOOM)}{menuItem('Zoom out', <Minus/>, () => engine.current?.zoom(editor.zoom / 1.2), '−', editor.zoom <= MIN_ZOOM)}{menuItem('Zoom to 100%', <Circle/>, () => engine.current?.zoom(1), '0')}{menuItem('Fit to content', <Maximize/>, () => engine.current?.fit(), '⇧ 1')}{menuItem('Zoom to selection', <MousePointer2/>, () => engine.current?.fit(true), '⇧ 2', !selected)}</div>}
+    {renameDocument && <div className="muze-dialog-backdrop" onClick={()=>setRenameDocument(null)}><form role="dialog" aria-modal="true" aria-label="Rename document" className="muze-document-name" data-muse-ui="true" onClick={event=>event.stopPropagation()} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape')setRenameDocument(null);}} onSubmit={event=>{event.preventDefault();engine.current?.renameDocument(renameDocument.id,renameDocument.title);setRenameDocument(null);}}><label>Document name<input autoFocus aria-label="Document name" maxLength={160} value={renameDocument.title} onFocus={event=>event.target.select()} onChange={event=>setRenameDocument({...renameDocument,title:event.target.value})}/></label><footer><button type="button" onClick={()=>setRenameDocument(null)}>Cancel</button><button disabled={!renameDocument.title.trim()}>Save name</button></footer></form></div>}
     {popup === 'shortcuts' && <div className="muze-dialog-backdrop" onClick={() => setPopup(null)}><section className="muze-shortcuts" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={event => event.stopPropagation()}><header><h2>Keyboard shortcuts</h2><Button label="Close shortcuts" onClick={() => setPopup(null)}><X size={18}/></Button></header>{[['Pan around', 'Hold Space / H'], ['Draw / Eraser', 'D / E'], ['Select', 'V'], ['Text / Note', 'T / N'], ['Rectangle / Ellipse', 'R / O'], ['Arrow / Line', 'A / L'], ['Undo / Redo', '⌘ Z / ⌘ ⇧ Z'], ['Copy / Paste', '⌘ C / ⌘ V'], ['Duplicate / Group', '⌘ D / ⌘ G'], ['Fit / Zoom to selection', '⇧ 1 / ⇧ 2'], ['Lock current tool', 'Q'], ['Edit a shape label', 'Enter / Double-click'], ['Snap while moving', 'Hold Ctrl / ⌘'], ['Highlight', '⇧ D'], ['Save board / Open', '⌘ S / ⌘ O'], ['Precise shapes', 'Hold Shift'], ['Zoom at the cursor', 'Ctrl + scroll / pinch']].map(([label, key]) => <div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</section></div>}
     {toast && <div className="muze-toast" role="alert">{toast}<Button label="Dismiss message" onClick={() => setToast('')}><X size={14}/></Button></div>}
-    <input ref={boardInput} aria-label="Open a board file" type="file" accept=".muze,.json" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void openFile(file); }}/>
-    <input ref={imageInput} aria-label="Choose an image" type="file" accept="image/*" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void engine.current?.addImage(file); }}/>
+    <input ref={boardInput} aria-label="Open a board file" type="file" accept=".muze,.json,.md,.txt" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void acceptFile(file); }}/>
+    <input ref={imageInput} aria-label="Choose an image" type="file" accept="image/*" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void acceptFile(file); }}/>
     </div>
-    <MuseCompanion thread={active.id + ':' + page.id} boardContext={boardContext} applyActions={actions => {
-      const now = current.current, board = now?.boards.find(board => board.id === now.activeBoard);
-      if (!board || board.id !== active.id || board.activePage !== page.id || museActive.current) return { ids: [], skipped: actions.cards.length + actions.updates.length };
+    {museOpen&&editor.items.filter(item=>item.id==='muse-appearance').map(item=><div key={item.id} className="muse-appearance-label" aria-label="Muse’s avatar. Select the image to replace it." style={{left:(item.x+item.w/2)*editor.zoom+editor.viewport[4],top:(item.y+item.h)*editor.zoom+editor.viewport[5]+8,width:Math.max(120,item.w*editor.zoom),transform:'translateX(-50%)'}}><span>Muse’s avatar</span></div>)}
+    <CanvasComments key={active.id+page.id} comments={active.comments||[]} pageId={page.id} firstPageId={active.pages[0].id} viewport={editor.viewport} placement={commentPlacement} save={comments=>updateBoard(board=>({...board,comments}))}/>
+    {museOpen && <><div className="muse-save-status" role="status">{museCanvas.status}</div>{museCanvas.error && <div className="muse-save-error" role="alert">{museCanvas.error}<button onClick={()=>void museCanvas.flush().catch(()=>{})}>Retry save</button></div>}</>}
+    <MuseCompanion historyControls={(editor.canUndo||editor.canRedo)?<div className="muse-history-controls"><Button label="Undo" shortcut="⌘ Z" disabled={!editor.canUndo} onClick={() => { void engine.current?.undo(); }}><Undo2 size={16}/></Button><Button label="Redo" shortcut="⌘ ⇧ Z" disabled={!editor.canRedo} onClick={() => { void engine.current?.undo(true); }}><Redo2 size={16}/></Button></div>:null} appearanceSelected={museOpen&&engine.current?.appearanceSelected()} appearanceAnchor={(()=>{const box=editor.items.find(item=>item.id==='muse-appearance');return box?{x:(box.x+box.w)*editor.zoom+editor.viewport[4]+12,y:box.y*editor.zoom+editor.viewport[5]}:undefined;})()} openAppearance={()=>{setMuseOpen(true);setAppearanceRequest(v=>v+1);}} appearanceChanged={async()=>{const response=await fetch('/api/muse/avatar',{cache:'no-store'});if(!response.ok)throw new Error('The avatar saved, but its board preview could not load. Reopen the notebook.');const blob=await response.blob();const source=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(blob);});await engine.current?.updateAppearance(source);}} beforeSend={museCanvas.flush} chatRequest={chatRequest} thread={active.id + ':' + page.id} boardContext={boardContext} applyActions={actions => {
+      const now = current.current, board = museActive.current ? privateBoardRef.current : now?.boards.find(board => board.id === now.activeBoard);
+      if (!board || board.id !== active.id || board.activePage !== page.id) return { ids: [], skipped: actions.cards.length + actions.updates.length };
       return engine.current?.applyMuseActions(actions) || { ids: [], skipped: actions.cards.length + actions.updates.length };
     }} addToBoard={text => engine.current?.addMuseText(text)} open={museOpen} onOpenChange={setMuseOpen} obstacles={editor.items.map(box => ({ id: box.id, x: box.x * editor.zoom + editor.viewport[4], y: box.y * editor.zoom + editor.viewport[5], w: box.w * editor.zoom, h: box.h * editor.zoom }))}/>
   </main>;

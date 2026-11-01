@@ -1,5 +1,5 @@
 import { ActiveSelection, Canvas, Ellipse, FabricImage, FabricObject, Group, IText, Line, PencilBrush, Point, Polygon, Rect, Textbox, Triangle, util, type TPointerEvent, type TMat2D } from 'fabric';
-import { MuzeArrow, MuzeNote, MuzeText, MuzeLabel, type Arrowhead } from './objects';
+import { MuzeArrow, MuzeDocument, MuzeNote, MuzeText, MuzeLabel, type Arrowhead } from './objects';
 import { MuzeShape, type Geo } from './shapes';
 import { GRID_STEP } from './grid';
 import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
@@ -9,7 +9,7 @@ import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
 type EditableText = IText | Textbox | MuzeText | MuzeLabel | MuzeNote;
 
-export type Tool = 'select' | 'hand' | 'draw' | 'eraser' | 'arrow' | 'text' | 'note' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'line' | 'highlight' | 'frame' | 'laser' | Geo;
+export type Tool = 'comment' | 'select' | 'hand' | 'draw' | 'eraser' | 'arrow' | 'text' | 'note' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'line' | 'highlight' | 'frame' | 'laser' | Geo;
 export type Paint = { color: string; fill: 'none' | 'soft' | 'solid' | 'pattern'; size: number; dash: 'draw' | 'solid' | 'dashed' | 'dotted'; opacity: number; font: string; fontSize: number; align: 'left' | 'center' | 'right'; verticalAlign: 'top' | 'middle' | 'bottom'; arrowStart: Arrowhead; arrowEnd: Arrowhead };
 export type EditorState = { ready: boolean; tool: Tool; zoom: number; selected: number; canUndo: boolean; canRedo: boolean; count: number; locked: boolean; snap: boolean; paint: Paint; selectionKind: string; guides: { x1: number; y1: number; x2: number; y2: number }[]; viewport: number[]; items: { id?: string; x: number; y: number; w: number; h: number }[] };
 export const INITIAL_PAINT: Paint = { color: '#1d1d1d', fill: 'none', size: 3.5, dash: 'draw', opacity: 1, font: FONTS[0].family, fontSize: 24, align: 'left', verticalAlign: 'middle', arrowStart: 'none', arrowEnd: 'arrow' };
@@ -45,6 +45,7 @@ export class WhiteboardEngine {
   private pinch: { distance: number; zoom: number; world: Point } | null = null;
   private resize: ResizeObserver;
   private disposers: (() => void)[] = [];
+  onComment?: (point: {x:number;y:number}) => void;
   onLaser?: (point: { x: number; y: number } | null) => void;
 
   constructor(element: HTMLCanvasElement, private changed: (drawing: Drawing) => void, private state: (state: EditorState) => void, private report: (message: string) => void) {
@@ -96,7 +97,7 @@ export class WhiteboardEngine {
     for (const event of ['object:scaling', 'object:rotating'] as const) c.on(event, () => { this.syncLabels(); this.connectors(); this.emit(); });
     c.on('path:created', ({ path }) => { path.id = crypto.randomUUID(); path.muzeKind = this.tool; path.muzeDash = this.paint.dash; path.muzeFill = this.paint.fill; path.opacity = this.tool === 'highlight' ? this.paint.opacity * .4 : this.paint.opacity; this.assignFrames(); this.checkpoint(); });
     c.on('text:editing:exited', ({ target }) => this.finishText(target));
-    c.on('text:changed', ({ target }) => { this.growText(target); this.publish(); });
+    c.on('text:changed', ({ target }) => { if(target instanceof MuzeDocument) target.markdown = target.text; this.growText(target); this.publish(); });
     c.on('mouse:dblclick', ({ e }) => {
       if (this.tool !== 'select') return;
       const target = c.findTarget(e).target;
@@ -121,6 +122,7 @@ export class WhiteboardEngine {
       const text = event.clipboardData?.getData('text/plain');
       if (image) { event.preventDefault(); void this.addImage(image); }
       else if (text) { event.preventDefault(); void this.pasteText(text); }
+      else if (event.clipboardData?.files.length) { event.preventDefault();this.report('This attachment is not supported. Paste an image or text, or add a written description.'); }
       else if (this.clipboard || sharedClipboard) { event.preventDefault(); void this.paste(); }
     };
     this.installTouch();
@@ -203,6 +205,7 @@ export class WhiteboardEngine {
     const e = event as PointerEvent;
     if (e.button === 1 || this.tool === 'hand' || this.space) { this.pan = { x: e.clientX, y: e.clientY }; this.canvas.selection = false; this.canvas.setCursor('grabbing'); return; }
     if (e.button !== 0) return;
+    if (this.tool === 'comment') { const point=this.canvas.getScenePoint(event);this.setTool('select');this.onComment?.({x:point.x,y:point.y});return; }
     if (this.tool === 'laser') { this.onLaser?.({ x: e.clientX, y: e.clientY }); return; }
     if (this.tool === 'select' || this.canvas.isDrawingMode) { this.rememberFrames(); return; }
     const point = this.canvas.getScenePoint(event); this.start = point;
@@ -286,6 +289,31 @@ export class WhiteboardEngine {
     const object = note ? new MuzeNote(text, options) : new MuzeText(text, options);
     this.canvas.add(object); this.setTool('select'); this.canvas.setActiveObject(object); this.growText(object); object.enterEditing(); object.selectAll(); this.canvas.requestRenderAll(); this.assignFrames(); this.checkpoint();
   }
+  focusAppearance() {
+    const object=this.canvas.getObjects().find(o=>o.id==='muse-appearance');
+    if(object){this.setTool('select');this.canvas.setActiveObject(object);this.fit(true);this.emit();return true;}return false;
+  }
+  appearanceSelected() {return this.canvas.getActiveObjects().length===1&&this.canvas.getActiveObjects()[0].id==='muse-appearance';}
+  async updateAppearance(source:string) {
+    const object=this.canvas.getObjects().find(o=>o.id==='muse-appearance');
+    if(object instanceof FabricImage){const width=object.getScaledWidth(),height=object.getScaledHeight();await object.setSrc(source);object.set({scaleX:width/object.width,scaleY:height/object.height});object.setCoords();this.canvas.requestRenderAll();this.checkpoint();}
+  }
+  selectedDocument() {
+    const selected=this.canvas.getActiveObjects();
+    const object=selected.length===1&&selected[0] instanceof MuzeDocument?selected[0]:null;
+    return object?{id:object.id!,title:object.documentTitle||'Document',canonical:['muse-file-soul','muse-file-memory'].includes(object.id||'')}:null;
+  }
+  renameDocument(id:string,title:string) {
+    const object=this.canvas.getObjects().find(item=>item.id===id);
+    if(!(object instanceof MuzeDocument)||['muse-file-soul','muse-file-memory'].includes(id)||!title.trim())return;
+    object.documentTitle=title.trim().slice(0,160);object.present();this.canvas.requestRenderAll();this.checkpoint();
+  }
+  addDocument(markdown = '# A new page\n\nStart anywhere.', title = 'Document.md') {
+    if (markdown.length > 24000) { this.report('Keep imported documents under 24,000 characters.'); return; }
+    const center=this.center();
+    const object=new MuzeDocument(markdown,{id:crypto.randomUUID(),markdown,documentTitle:title.slice(0,160),left:center.x-220,top:center.y-190,width:440,boxHeight:380,inset:28,fontSize:20,fontFamily:'IBM Plex Sans',fill:'#202124',backgroundColor:'#ffffff',strokeWidth:0,verticalAlign:'top',muzeKind:'document'});
+    this.canvas.add(object);this.setTool('select');this.canvas.setActiveObject(object);this.assignFrames();this.checkpoint();
+  }
   addMuseText(text: string) {
     const plain = text.replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.*?)\*\*/g, '$1');
     const boxes = this.canvas.getObjects().map(object => object.getBoundingRect()), center = this.center();
@@ -315,16 +343,19 @@ export class WhiteboardEngine {
       changed.push(object);
     }
     const center = this.center(), boxes = c.getObjects().map(object => object.getBoundingRect());
-    const columns = c.width < 700 ? 1 : 2, width = 320, gap = 28;
+    const columns = c.width < 700 ? 1 : 2, width = 320, gap = 44, organic=actions.layout!=='aligned';
     const left = boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
     let top = boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;
     for (const card of actions.cards) {
       if (c.getObjects().some(object => object.id === card.id)) continue;
       if (index && index % columns === 0) { top += rowHeight + gap; rowHeight = 0; }
-      const object = new MuzeNote(card.title + '\n\n' + card.body, { id: card.id, left: left + (index % columns) * (width + gap), top, width, boxHeight: 210, inset: 22, fontSize: 18, fontFamily: FONTS[1].family, fontWeight: 400, lineHeight: 1.2, textAlign: 'left', verticalAlign: 'top', fill: '#1d1d1d', backgroundColor: ['#f8e9b5', '#dfece5', '#e4e7f5'][index % 3], stroke: '#1d1d1d', strokeWidth: 0, muzeKind: 'note', objectCaching: false });
+      const object = new MuzeNote(card.title + '\n\n' + card.body, { id: card.id, left: left + (index % columns) * (width + gap)+(organic?[0,14,-10,8][index%4]:0), top:top+(organic?[0,20,-8,12][index%4]:0), angle:organic&&card.body.length<320?[0,-1.4,1.1,0,.8,-1.2][index%6]:0, width, boxHeight: 210, inset: 22, fontSize: 18, fontFamily: FONTS[1].family, fontWeight: 400, lineHeight: 1.2, textAlign: 'left', verticalAlign: 'top', fill: '#1d1d1d', backgroundColor: ['#f8e9b5', '#dfece5', '#e4e7f5'][index % 3], stroke: '#1d1d1d', strokeWidth: 0, muzeKind: 'note', objectCaching: false });
       object.setSelectionStyles({ fontWeight: 600 }, 0, card.title.length);
       object.initDimensions(); object.setCoords();
-      c.add(object); changed.push(object); rowHeight = Math.max(rowHeight, object.height); index++;
+      // Keep rotated bounds clear of both existing work and this batch.
+      for(let attempt=0;attempt<100;attempt++){const bounds=object.getBoundingRect();if(!boxes.some(b=>bounds.left<b.left+b.width+16&&bounds.left+bounds.width+16>b.left&&bounds.top<b.top+b.height+16&&bounds.top+bounds.height+16>b.top))break;object.set('top',object.top+24);object.setCoords();}
+      const bounds=object.getBoundingRect();boxes.push(bounds);
+      c.add(object); changed.push(object); rowHeight = Math.max(rowHeight, bounds.top+bounds.height-top); index++;
     }
     if (changed.length) {
       this.assignFrames(); this.connectors(); this.checkpoint();
@@ -599,8 +630,8 @@ export class WhiteboardEngine {
       const portable = await FabricImage.fromURL(src); const center = this.center();
       if (this.closed) return;
       portable.set({ id: crypto.randomUUID(), left: center.x - Math.min(portable.width, 480) / 2, top: center.y - Math.min(portable.height, 320) / 2 }); portable.scale(Math.min(1, 480 / portable.width, 360 / portable.height));
-      this.canvas.add(portable); this.setTool('select'); this.canvas.setActiveObject(portable); this.checkpoint();
-    } catch (error) { this.report(error instanceof Error ? error.message : 'Could not open that image.'); }
+      this.canvas.add(portable); this.setTool('select'); this.canvas.setActiveObject(portable); this.checkpoint(); return true;
+    } catch (error) { this.report(error instanceof Error ? error.message : 'Could not open that image.'); return false; }
   }
   async export(format: 'png' | 'svg', title: string) {
     const fonts = format === 'svg' ? await svgFonts() : '';
@@ -653,7 +684,7 @@ export class WhiteboardEngine {
     if (key === 'enter') { event.preventDefault(); this.editLabel(); return; }
     if (key === 'q') { this.toggleToolLock(); return; }
     if (key === '1' || event.code === 'Digit1') this.fit(); else if (key === '2' || event.code === 'Digit2') this.fit(true); else if (key === '0' || event.code === 'Digit0') this.zoom(1); else if (key === '+' || key === '=') this.zoom(this.canvas.getZoom() * 1.25); else if (key === '-') this.zoom(this.canvas.getZoom() / 1.25);
-    const keys: Record<string, Tool> = { v: 'select', h: 'hand', d: event.shiftKey ? 'highlight' : 'draw', p: 'draw', e: 'eraser', a: 'arrow', t: 'text', n: 'note', r: 'rectangle', o: 'ellipse', l: 'line', f: 'frame', k: 'laser' };
+    const keys: Record<string, Tool> = { c: 'comment', v: 'select', h: 'hand', d: event.shiftKey ? 'highlight' : 'draw', p: 'draw', e: 'eraser', a: 'arrow', t: 'text', n: 'note', r: 'rectangle', o: 'ellipse', l: 'line', f: 'frame', k: 'laser' };
     if (keys[key]) { event.preventDefault(); this.setTool(keys[key]); }
     if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
       event.preventDefault(); const delta = event.shiftKey ? 10 : 1;

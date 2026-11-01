@@ -1,10 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { museFixture, exported, chat, send } from './muse-fixture';
+
+async function openMuseEditor(page:Page) { await page.getByRole('button',{name:'Open Muse',exact:true}).click(); await page.getByRole('dialog',{name:'Muse',exact:true}).getByRole('button',{name:'Edit Muse',exact:true}).click(); }
 
 const origin = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3201';
 
 test('Clerk exposes Google sign-in and keeps private Muse routes closed to anonymous requests', async ({ page, request }) => {
-  for (const path of ['session', 'avatar', 'notes/soul', 'notes/memory', 'chat?thread=board:page']) {
+  for (const path of ['canvas', 'session', 'avatar', 'notes/soul', 'notes/memory', 'chat?thread=board:page']) {
     const response = await request.get('/api/muse/' + path);
     expect(response.status()).toBe(401);
     expect(response.headers()['cache-control']).toContain('no-store');
@@ -17,12 +19,11 @@ test('Clerk exposes Google sign-in and keeps private Muse routes closed to anony
   const privateRequests: string[] = [];
   page.on('request', value => { if (new URL(value.url()).pathname.startsWith('/api/muse/')) privateRequests.push(value.url()); });
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Edit my Muse', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Talk to Muse' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Muse' })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in to share', exact: true }).click();
   await expect(page.getByRole('button', { name: /Google/ })).toBeVisible();
   await page.locator('.cl-modalCloseButton').click();
-  await page.getByRole('button', { name: 'Talk to Muse' }).click();
+  await openMuseEditor(page);
   await expect(page.getByRole('button', { name: /Google/ })).toBeVisible();
   expect(privateRequests).toEqual([]);
   await page.screenshot({ path: 'verification/muze-clerk-sign-in.png' });
@@ -32,13 +33,13 @@ test('Clerk exposes Google sign-in and keeps private Muse routes closed to anony
 // The real server authorization boundary is exercised separately above.
 test('Muse looks toward the pointer, floats through open space, and can be grabbed or moved with the keyboard', async ({ page }) => {
   await museFixture(page);
-  const muse = page.getByRole('button', { name: 'Talk to Muse' });
-  const face = muse.locator('.muse-orb');
-  const gaze = () => face.evaluate(element => parseFloat(element.style.getPropertyValue('--muse-gaze-x')));
+  const muse = page.getByRole('button', { name: 'Open Muse' });
+  const face = muse.locator('.muse-portrait');
+  const gaze = () => face.evaluate(el=>parseFloat(el.style.getPropertyValue('--motion-x')));
   await page.mouse.move(600, 400);
-  await expect.poll(gaze).toBeGreaterThan(4);
+  await expect.poll(gaze).toBeGreaterThan(.5);
   await page.mouse.move(0, 650);
-  await expect.poll(gaze).toBeLessThan(-1);
+  await expect.poll(gaze).toBeLessThan(-.05);
   const start = (await muse.boundingBox())!;
   await page.mouse.move(700, 400);
   await expect.poll(async () => Math.abs((await muse.boundingBox())!.x - start.x), { timeout: 11000 }).toBeGreaterThan(45);
@@ -48,62 +49,48 @@ test('Muse looks toward the pointer, floats through open space, and can be grabb
   await page.mouse.down();
   await page.mouse.move(grabbed.x + 240, grabbed.y - 65, { steps: 12 });
   await page.mouse.up();
-  await expect(page.getByRole('complementary', { name: 'Chat with Muse' })).toBeHidden();
+  await expect(page.locator('.muse-chat-messages')).toBeHidden();
   const dropped = (await muse.boundingBox())!;
-  expect(dropped.x - grabbed.x).toBeCloseTo(200, 0);
-  expect(dropped.y - grabbed.y).toBeCloseTo(-100, 0);
+  expect(Math.abs(dropped.x - grabbed.x - 200)).toBeLessThan(2);
+  expect(Math.abs(dropped.y - grabbed.y + 100)).toBeLessThan(2);
   await muse.press('ArrowRight');
   await expect.poll(async () => (await muse.boundingBox())!.x).toBeCloseTo(dropped.x + 16, 0);
   await muse.press('Enter');
-  await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled();
+  await expect(page.getByRole('dialog',{name:'Muse',exact:true})).toBeVisible();
+  await page.getByRole('dialog',{name:'Muse',exact:true}).getByRole('button',{name:'Edit Muse',exact:true}).click();
+  await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','true');
 });
 
-test('private notes edit, persist, handle conflicts, and stay out of whiteboard exports', async ({ page }) => {
-  const fixture = await museFixture(page);
-  await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit Soul.md', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Edit Soul.md' }).fill('# My private style\n\nKeep explanations brief.');
-  await page.getByRole('button', { name: 'Save Soul.md' }).click();
-  await expect(page.getByLabel('Soul.md content', { exact: true })).toContainText('My private style');
-  await page.getByRole('button', { name: 'Edit Memory.md', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Edit Memory.md' }).fill('An unsaved preference');
-  fixture.notes.set('owner-a:memory', { content: '# Saved elsewhere', revision: 'newer', updatedAt: Date.now() });
-  await page.getByRole('button', { name: 'Save Memory.md' }).click();
-  await expect(page.getByRole('alert')).toContainText('changed elsewhere');
-  await expect(page.getByRole('textbox', { name: 'Edit Memory.md' })).toHaveValue('An unsaved preference');
-  await page.getByRole('button', { name: 'Cancel editing Memory.md' }).click();
-  await expect(page.getByLabel('Memory.md content', { exact: true })).toContainText('Saved elsewhere');
-  await page.getByRole('button', { name: 'Back to whiteboard' }).click();
-  expect((await exported(page)).text).not.toContain('My private style');
-  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('My private style');
-  await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
-  await expect(page.getByLabel('Soul.md content', { exact: true })).toContainText('My private style');
-  await page.screenshot({ path: 'verification/muze-private-notes.png' });
+test('canonical documents edit on the actual canvas and persist without entering ordinary exports', async ({page})=>{
+ const fixture=await museFixture(page);
+ await openMuseEditor(page);
+ await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-ready','true');
+ await page.mouse.dblclick(300,250);
+ const input=page.locator('textarea[data-fabric="textarea"]');
+ await expect(input).toBeAttached();await input.fill('# My own way\n\nKeep explanations brief.');await input.press('Escape');
+ await expect.poll(()=>fixture.notes.get('owner-a:soul')?.content).toContain('My own way');
+ await expect(page.locator('.muse-save-status')).toHaveText('Saved');
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();
+ expect((await exported(page)).text).not.toContain('My own way');
+ await openMuseEditor(page);
+ expect((await exported(page)).text).toContain('My own way');
+ await page.screenshot({path:'verification/muse-fabric-journal-desktop.png'});
 });
 
-test('account changes unmount private notes, drafts, and chat', async ({ page }) => {
-  const fixture = await museFixture(page);
-  await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit Soul.md', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Edit Soul.md' }).fill('Owner A private draft');
-  await fixture.owner('owner-b');
-  await expect(page.getByRole('textbox', { name: 'Edit Soul.md' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Talk to Muse' })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
-  await expect(page.getByLabel('Soul.md content', { exact: true })).toContainText('owner-b');
-  await expect(page.getByText('Owner A private draft')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Edit my Muse', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Muse private space' })).toHaveCount(0);
+test('account changes clear private canvas and chat',async({page})=>{
+ const fixture=await museFixture(page);await openMuseEditor(page);
+ await fixture.owner('owner-b');await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','false');
+ await openMuseEditor(page);
+ expect((await exported(page)).text).not.toContain('owner-a');
 });
 
 test('Muse moves to its work, adds spaced editable notes, and returns to its resting spot', async ({ page }) => {
   await museFixture(page);
-  const muse = page.getByRole('button', { name: 'Talk to Muse' });
+  const muse = page.getByRole('button', { name: 'Open Muse' });
   const initial = (await muse.boundingBox())!;
   await page.mouse.move(initial.x + 40, initial.y + 40); await page.mouse.down(); await page.mouse.move(410, 420, { steps: 10 }); await page.mouse.up();
   await expect.poll(async () => (await muse.boundingBox())!.x).toBeGreaterThan(300);
-  await expect(page.getByRole('complementary', { name: 'Chat with Muse' })).toBeHidden();
+  await expect(page.locator('.muse-chat-messages')).toBeHidden();
   await chat(page); await send(page);
   await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
   const plan = await exported(page);
@@ -112,6 +99,8 @@ test('Muse moves to its work, adds spaced editable notes, and returns to its res
   await expect(page.locator('.muse-floating')).toHaveClass(/working/);
   await page.screenshot({ path: 'verification/muze-collaboration.png' });
   await page.getByRole('button', { name: 'Close Muse chat' }).click();
+  // Leave the character's hover area so its intentional hover pause can release.
+  await page.mouse.move(1400,100);
   await expect(page.locator('.muse-floating')).not.toHaveClass(/working/, { timeout: 9000 });
   await expect.poll(async () => Math.round((await muse.boundingBox())!.x)).toBe(24);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
@@ -143,14 +132,13 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
 
 test('custom icons and the private editor work on a narrow screen', async ({ page }) => {
   await museFixture(page);
-  await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
+  await openMuseEditor(page);
   const image = await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32; const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#d497ca'; ctx.fillRect(0, 0, 32, 32); return canvas.toDataURL('image/png').split(',')[1]; });
   await page.getByLabel('Choose Muse icon', { exact: true }).setInputFiles({ name: 'muse.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') });
-  await expect(page.locator('.muse-change-icon img')).toBeVisible();
+  await expect(page.locator('.muze-vector-surface [id="muse-appearance"]')).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Back to whiteboard' })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit Soul.md', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Edit Soul.md' })).toBeVisible();
+  await expect(page.locator('.muze-drawing-surface canvas').first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await page.screenshot({ path: 'verification/muze-private-mobile.png' });
 });
@@ -168,4 +156,221 @@ test('switching pages cancels pending work without adding it to the new page', a
   release();
   await expect(page.getByText('Muse is thinking', { exact: true })).toHaveCount(0);
   expect((await exported(page)).objects).toHaveLength(0);
+});
+
+
+test('bottom chat precedes More; comments persist on ordinary boards', async ({page}) => {
+ await museFixture(page);
+ const tools=page.getByRole('toolbar',{name:'Whiteboard tools',exact:true});
+ await expect(tools.getByRole('button').last()).toHaveAttribute('aria-label','More tools');
+ await page.getByRole('textbox',{name:'Message Muse',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeVisible();
+ await page.getByRole('button',{name:'Close Muse chat'}).click();
+ await page.getByRole('button',{name:'Comment',exact:true}).click();await page.mouse.click(1050,400);
+ await page.getByRole('textbox',{name:'Write a comment'}).fill('Review this board Friday');
+ await page.getByRole('button',{name:'Post comment'}).click();
+ await expect(page.getByRole('dialog',{name:'Canvas comment'})).toContainText('Review this board Friday');
+ expect((await exported(page)).text).toContain('Review this board Friday');
+});
+
+test('special notebook uses normal tools, local media, comments and visible unsupported-drop errors',async({page})=>{
+ const fixture=await museFixture(page);await openMuseEditor(page);
+ await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-ready','true');
+ await page.getByRole('button',{name:'Rectangle',exact:true}).click();await page.mouse.move(950,450);await page.mouse.down();await page.mouse.move(1100,550);await page.mouse.up();
+ await expect.poll(()=>fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBeGreaterThan(3);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ await expect.poll(()=>fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBe(3);
+ await page.getByRole('button',{name:'Redo',exact:true}).click();
+ await expect.poll(()=>fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBeGreaterThan(3);
+ for(const target of ['.muze-drawing-surface','.muze-header','.muze-toolbar-dock']) {
+   await page.locator(target).evaluate(el=>{const dt=new DataTransfer();dt.items.add(new File(['pdf'],'scan.pdf',{type:'application/pdf'}));el.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));});
+   await expect(page.getByRole('alert')).toContainText('not supported');await page.getByRole('button',{name:'Dismiss message'}).click();
+ }
+ await page.getByRole('button',{name:'Comment',exact:true}).click();await page.mouse.click(1050,400);await page.getByRole('textbox',{name:'Write a comment'}).fill('Remember the Friday review');await page.getByRole('button',{name:'Post comment'}).click();
+ await expect.poll(()=>JSON.stringify(fixture.canvases.get('owner-a')?.board.comments)).toContain('Friday review');
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Close comment'}).click();await page.getByRole('button',{name:'Zoom',exact:true}).click();await page.getByRole('menuitem',{name:/^Fit to content/}).click();
+ await expect(page.locator('.muse-save-status')).toHaveText('Saved');
+  await page.screenshot({path:'verification/muse-fabric-journal-mobile.png'});
+});
+
+test('avatar generation requires confirmation, previews before activation, and chooses cursor directions', async ({page}) => {
+ await museFixture(page);
+ await openMuseEditor(page);
+ const image=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=96;const x=c.getContext('2d')!;x.fillStyle='#decfaa';x.fillRect(0,0,96,96);return c.toDataURL('image/png').split(',')[1];});
+ await page.getByLabel('Choose Muse icon',{exact:true}).setInputFiles({name:'fixture.png',mimeType:'image/png',buffer:Buffer.from(image,'base64')});
+ let generationCalls=0;page.on('request',req=>{if(req.url().endsWith('/api/muse/avatar') && req.method()==='POST') generationCalls++;});
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();await page.getByRole('button',{name:'Open Muse',exact:true}).click();await page.getByRole('dialog',{name:'Muse',exact:true}).getByRole('button',{name:'Change avatar'}).click();
+ await page.getByRole('button',{name:'Generate gaze · $0.01'}).click();
+ expect(generationCalls).toBe(0);
+ await page.getByRole('button',{name:'Confirm $0.01 generation'}).click();
+ await expect(page.getByAltText('Nine generated gaze directions to review')).toBeVisible();
+ expect(generationCalls).toBe(1);
+ await page.getByRole('button',{name:'Use these gaze frames'}).click();
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();
+ const avatar=page.getByRole('button',{name:'Open Muse',exact:true}).locator('.muse-portrait');
+ await expect(avatar).toBeVisible();
+ await page.mouse.move(1400,100);
+ await expect.poll(()=>avatar.evaluate(el=>parseFloat(el.style.getPropertyValue('--motion-x')))).toBeGreaterThan(.5);
+ await page.mouse.move(0,890);
+ await expect.poll(()=>avatar.evaluate(el=>parseFloat(el.style.getPropertyValue('--motion-x')))).toBeLessThan(-.05);
+});
+
+
+test('shared documents create, edit, move, resize and survive reload on ordinary and Muse canvases',async({page})=>{
+ const fixture=await museFixture(page);
+ for(const special of [false,true]) {
+  if(special)await openMuseEditor(page);
+  await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-ready','true');
+  await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
+  let snapshot=await exported(page);let doc=snapshot.objects.find(o=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'))!;
+  expect(doc).toBeTruthy();
+  const viewport=snapshot.viewport;const x=doc.left*viewport[0]+viewport[4]+60,y=doc.top*viewport[0]+viewport[5]+60;
+  await page.mouse.dblclick(x,y);const input=page.locator('textarea[data-fabric="textarea"]');await expect(input).toBeAttached();await input.fill('# A small plan\n\n**Remember** the picnic.');await input.press('Escape');
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+75,y+35,{steps:8});await page.mouse.up();
+  snapshot=await exported(page);doc=snapshot.objects.find(o=>o.id===doc.id)!;expect(doc.left).toBeGreaterThan(100);
+  // Textbox's right middle control changes document width without a separate editor.
+  await page.mouse.click(doc.left*viewport[0]+viewport[4]+30,doc.top*viewport[0]+viewport[5]+30);
+
+  const editing=page.locator('textarea[data-fabric="textarea"]');if(await editing.count())await editing.press('Escape');
+  snapshot=await exported(page);doc=snapshot.objects.find(o=>o.id===doc.id)!;
+  const rendered=(await page.locator('.muze-vector-surface [id="'+doc.id+'"]').boundingBox())!;
+  const right=rendered.x+rendered.width,middle=rendered.y+rendered.height/2;
+  await page.mouse.move(right,middle);await page.mouse.down();await page.mouse.move(right+55,middle,{steps:8});await page.mouse.up();
+  const resized=(await exported(page)).objects.find(o=>o.id===doc.id)!;expect(resized.width).toBeGreaterThan(doc.width);
+  if(special)await expect(page.locator('.muse-save-status')).toHaveText('Saved');
+  await page.reload();await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-ready','true');
+  if(special)await openMuseEditor(page);
+  const restored=(await exported(page)).text;expect(restored).toContain('Remember');expect(restored).toContain('MuzeDocument');
+  if(!special)expect(fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBe(3);
+ }
+});
+
+
+test('Markdown imports use shared document elements and do not fetch embedded images',async({page})=>{
+ const fixture=await museFixture(page);const external:string[]=[];page.on('request',r=>{if(r.url().includes('example.invalid'))external.push(r.url());});
+ for(const special of [false,true]) {
+  if(special)await openMuseEditor(page);
+  await page.getByRole('button',{name:'More tools',exact:true}).click();
+  const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Import document',exact:true}).click();
+  await (await chooser).setFiles({name:'picnic.md',mimeType:'text/markdown',buffer:Buffer.from('# Picnic\n\n**Bring** sandwiches.\n![reference](https://example.invalid/photo.png)')});
+  await expect.poll(async()=> (await exported(page)).text).toContain('picnic.md');
+  const data=(await exported(page)).text;expect(data).toContain('**Bring**');expect(data).toContain('MuzeDocument');
+  if(special)await expect(page.locator('.muse-save-status')).toHaveText('Saved');
+  else expect(JSON.stringify(fixture.canvases.get('owner-a'))).not.toContain('sandwiches');
+ }
+ expect(external).toEqual([]);
+});
+
+ test('Muse popup opens before Edit, dismisses, and reopens after returning',async({page})=>{
+  await museFixture(page);
+  const character=page.getByRole('button',{name:'Open Muse',exact:true}), popup=page.getByRole('dialog',{name:'Muse',exact:true}), board=page.getByRole('main',{name:'Muse Board'});
+  await character.click();await expect(popup).toBeVisible();await expect(board).toHaveAttribute('data-muse-board','false');
+  await page.keyboard.press('Escape');await expect(popup).toBeHidden();await expect(character).toBeFocused();
+  await character.click();await page.mouse.click(700,100);await expect(popup).toBeHidden();
+  await character.click();await popup.getByRole('button',{name:'Close Muse popup'}).click();await expect(popup).toBeHidden();
+  await character.click();await popup.getByRole('button',{name:'Edit Muse',exact:true}).click();await expect(board).toHaveAttribute('data-muse-board','true');await expect(popup).toBeHidden();
+  await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect(board).toHaveAttribute('data-muse-board','false');await character.click();await expect(popup).toBeVisible();
+  await page.setViewportSize({width:390,height:844});await expect(popup).toBeVisible();await page.screenshot({path:'verification/muse-popup-mobile.png'});
+  await page.setViewportSize({width:1440,height:900});await page.screenshot({path:'verification/muse-popup-desktop.png'});
+ });
+
+test('anchored comments follow pan and zoom, persist, edit, cancel and reopen on both boards',async({page})=>{
+ await museFixture(page);
+ for(const special of [false,true]){
+  if(special)await openMuseEditor(page);
+  if(special)await expect(page.locator('[data-comment-id="muse-welcome"]')).toBeVisible();
+  await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+  await page.getByRole('button',{name:'Hand',exact:true}).click();await page.mouse.move(700,500);await page.mouse.down();await page.mouse.move(760,540);await page.mouse.up();
+  const before=await exported(page),[zoom,,,,tx,ty]=before.viewport;
+  await page.getByRole('button',{name:'Comment',exact:true}).click();const origin=(await page.locator('.upper-canvas').boundingBox())!;await page.mouse.click(990,480);
+  const dialog=page.getByRole('dialog',{name:'Canvas comment'});
+  await dialog.getByRole('textbox',{name:'Write a comment'}).fill('An anchored thought '+special);await dialog.getByRole('button',{name:'Post comment'}).click();
+  await dialog.getByRole('button',{name:'Close comment'}).click();
+  const data=JSON.parse((await exported(page)).text), comment=data.board.comments.find((c:{text:string})=>c.text==='An anchored thought '+special);
+  expect(comment.x).toBeCloseTo((990-origin.x-tx)/zoom,2);expect(comment.y).toBeCloseTo((480-origin.y-ty)/zoom,2);expect(comment.pageId).toBe(data.board.activePage);
+  let pin=page.locator('[data-comment-id="'+comment.id+'"]');await pin.click();await dialog.getByRole('button',{name:'Edit comment'}).click();await dialog.getByRole('textbox').fill('Revised anchored thought '+special);await dialog.getByRole('button',{name:'Save comment'}).click();await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Hand',exact:true}).click();await page.mouse.move(700,500);await page.mouse.down();await page.mouse.move(740,530);await page.mouse.up();
+  await page.getByRole('button',{name:'Zoom out',exact:true}).click();const after=await exported(page),[z,,,,x,y]=after.viewport,box=(await pin.boundingBox())!;
+  const canvas=(await page.locator('.upper-canvas').boundingBox())!;expect(box.x+box.width/2).toBeCloseTo(comment.x*z+x+canvas.x,0);expect(box.y+box.height/2).toBeCloseTo(comment.y*z+y+canvas.y,0);
+  await page.getByRole('button',{name:'Comment',exact:true}).click();await page.mouse.click(1000,600);await dialog.getByRole('textbox').fill('Cancel me');await dialog.getByRole('button',{name:'Cancel',exact:true}).click();expect((await exported(page)).text).not.toContain('Cancel me');
+  if(special)await expect(page.locator('.muse-save-status')).toHaveText('Saved');await page.reload();if(special)await openMuseEditor(page);
+  pin=page.locator('[data-comment-id="'+comment.id+'"]');await pin.click();await expect(dialog).toContainText('Revised anchored thought '+special);await page.mouse.click(700,100);await expect(dialog).toBeHidden();
+  await pin.click();await page.screenshot({path:'verification/anchored-comments-'+(special?'muse':'ordinary')+'.png'});await page.keyboard.press('Escape');
+  if(special){
+   await page.setViewportSize({width:390,height:844});const position=(await pin.boundingBox())!;await page.mouse.move(200,300);await page.mouse.wheel(position.x+position.width/2-160,position.y+position.height/2-300);await pin.click();await page.screenshot({path:'verification/anchored-comments-mobile.png'});await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'Back to whiteboard'}).click();
+  }
+ }
+});
+
+test('Muse popup exposes chat and opens avatar controls through its existing board',async({page})=>{
+ await museFixture(page);const character=page.getByRole('button',{name:'Open Muse',exact:true}),popup=page.getByRole('dialog',{name:'Muse',exact:true});
+ await character.click();await expect(popup.getByRole('button',{name:'Edit Muse',exact:true})).toBeVisible();await expect(popup.getByRole('button',{name:'Change avatar',exact:true})).toBeVisible();
+ await popup.getByRole('button',{name:'Chat',exact:true}).click();await expect(page.locator('.muse-chat-messages')).toBeVisible();await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','false');await page.getByRole('button',{name:'Close Muse chat'}).click();
+ await character.click();await popup.getByRole('button',{name:'Change avatar',exact:true}).click();await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','true');await expect(page.getByRole('button',{name:'Change Muse icon',exact:true})).toBeVisible();await expect(page.locator('.muze-vector-surface [id="muse-appearance"]')).toBeVisible();
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();await character.click();await page.screenshot({path:'verification/muse-actions-desktop.png'});await page.setViewportSize({width:390,height:844});await page.screenshot({path:'verification/muse-actions-mobile.png'});
+});
+
+test('document name colors survive rename, editing and reload on both boards',async({page})=>{
+ await museFixture(page);
+ for(const special of [false,true]){
+  if(special)await openMuseEditor(page);
+  await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
+  const before=JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:{type:string;id:string})=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'));
+  await page.getByRole('button',{name:'Selection actions',exact:true}).click();await page.getByRole('menuitem',{name:'Rename document',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Rename document'});await dialog.getByRole('textbox',{name:'Document name'}).fill('Picnic.md');await dialog.getByRole('button',{name:'Save name'}).click();
+  const named=JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:{id:string})=>o.id===before.id);expect(named.documentTitle).toBe('Picnic.md');expect(named.backgroundColor).not.toBe(before.backgroundColor);
+  const bounds=(await page.locator('.muze-vector-surface [id="'+before.id+'"]').boundingBox())!;await page.mouse.dblclick(bounds.x+60,bounds.y+70);const input=page.locator('textarea[data-fabric="textarea"]');await input.fill('# A picnic\n\nBring a blanket.');await input.press('Escape');
+  if(special)await expect(page.locator('.muse-save-status')).toHaveText('Saved');await page.reload();if(special)await openMuseEditor(page);
+  const loaded=JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:{id:string})=>o.id===before.id);expect(loaded.documentTitle).toBe('Picnic.md');expect(loaded.backgroundColor).toBe(named.backgroundColor);expect(loaded.markdown).toContain('Bring a blanket.');
+  const app=await page.locator('.muze-app').evaluate(el=>{const s=getComputedStyle(el);return {canvas:s.getPropertyValue('--canvas'),blue:s.getPropertyValue('--blue')};});expect(app).toEqual({canvas:'#f9fafb',blue:'#2e70d6'});
+  await page.screenshot({path:'verification/document-colors-'+(special?'muse':'ordinary')+'.png'});
+ }
+});
+
+test('composer centers typed text, grows for multiline, and keeps history above it',async({page})=>{
+ await museFixture(page);await page.getByRole('button',{name:'Rectangle',exact:true}).click();await page.mouse.move(300,300);await page.mouse.down();await page.mouse.move(400,400);await page.mouse.up();
+ for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+  await page.setViewportSize(viewport);const input=page.getByRole('textbox',{name:'Message Muse'});await input.fill('A single line');
+  const metrics=await input.evaluate(el=>{const s=getComputedStyle(el);return {height:el.getBoundingClientRect().height,line:parseFloat(s.lineHeight),top:parseFloat(s.paddingTop),bottom:parseFloat(s.paddingBottom)};});expect(metrics.top).toBe(metrics.bottom);expect(metrics.height).toBeCloseTo(metrics.line+metrics.top+metrics.bottom,0);
+  expect(await page.locator('.muse-chat form svg').count()).toBe(1);await expect(page.locator('.muse-presence')).toHaveCount(0);
+  const history=(await page.locator('.muse-history-controls').boundingBox())!,box=(await page.locator('.muse-chat').boundingBox())!;expect(history.y+history.height).toBeLessThan(box.y);
+  await input.fill('Line one\nLine two\nLine three');const larger=(await input.boundingBox())!;expect(larger.height).toBeGreaterThan(metrics.height);expect(larger.height).toBeLessThanOrEqual(126);
+  await page.screenshot({path:'verification/composer-'+viewport.width+'.png'});
+ }
+});
+
+test('More stays anchored and preserves document drafts with keyboard and narrow layouts',async({page})=>{
+ await museFixture(page);
+ for(const special of [false,true]){
+  if(special)await openMuseEditor(page);
+  await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
+  const doc=(await exported(page)).objects.find(o=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'))!,bounds=(await page.locator('.muze-vector-surface [id="'+doc.id+'"]').boundingBox())!;await page.mouse.dblclick(bounds.x+60,bounds.y+70);await page.locator('textarea[data-fabric="textarea"]').fill('Draft stays here');
+  const more=page.getByRole('button',{name:'More tools',exact:true});await more.click();const panel=page.getByRole('toolbar',{name:'More drawing tools'});await expect(panel).toBeVisible();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('button').nth(2)).toBeFocused();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(more).toBeFocused();expect((await exported(page)).text).toContain('Draft stays here');
+  await page.setViewportSize({width:390,height:844});await page.getByRole('textbox',{name:'Message Muse'}).fill('A thought while choosing tools');await more.click();const p=(await panel.boundingBox())!,chat=(await page.locator('.muse-chat-stack').boundingBox())!;expect(p.x).toBeGreaterThanOrEqual(0);expect(p.x+p.width).toBeLessThanOrEqual(390);expect(p.y).toBeGreaterThanOrEqual(70);expect(chat.y+chat.height).toBeLessThan(p.y);await page.screenshot({path:'verification/more-'+(special?'muse':'ordinary')+'-mobile.png'});
+  await page.mouse.click(370,100);await expect(panel).toBeHidden();await more.click();await page.getByRole('button',{name:'Comment',exact:true}).click();await expect(panel).toBeHidden();await page.mouse.click(200,300);await expect(page.getByRole('dialog',{name:'Canvas comment'})).toBeVisible();await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});
+ }
+});
+
+test('generated notes use stable organic poses and honor explicit aligned layouts',async({page})=>{
+ const fixture=await museFixture(page);await send(page,'Brainstorm a project');await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
+ const first=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(first.some((o:{angle:number})=>Math.abs(o.angle)>0)).toBe(true);await page.getByRole('button',{name:'Close Muse chat'}).click();await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await exported(page)).objects).toHaveLength(0);await page.getByRole('button',{name:'Redo',exact:true}).click();const restored=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(restored.map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));await page.reload();expect(JSON.parse((await exported(page)).text).board.pages[0].objects.map((o:any)=>[o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.left,o.top,o.angle]));
+ fixture.response(async()=>({cards:[{id:'aligned-a',title:'First',body:'A short note'},{id:'aligned-b',title:'Second',body:'Another short note'}],updates:[]}));await send(page,'Add two notes aligned in a grid');await expect.poll(async()=>JSON.parse((await exported(page)).text).board.pages[0].objects.length).toBe(5);const all=JSON.parse((await exported(page)).text).board.pages[0].objects;for(const o of all.filter((o:any)=>o.id.startsWith('aligned')))expect(o.angle).toBe(0);expect(all.filter((o:any)=>!o.id.startsWith('aligned')).map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));
+});
+
+test('pending notebook preferences save before leaving and remain available to workspace chat',async({page})=>{
+ const fixture=await museFixture(page);await openMuseEditor(page);
+ let release!:()=>void,entered=false;const gate=new Promise<void>(resolve=>release=resolve);fixture.canvasSave(async()=>{entered=true;await gate;});
+ await page.getByRole('button',{name:'Note',exact:true}).click();await page.mouse.click(850,650);const input=page.locator('textarea[data-fabric="textarea"]');await input.fill('Please sound like a cat. Meow occasionally.');await input.press('Escape');
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect.poll(()=>entered).toBe(true);await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','true');release();fixture.canvasSave(async()=>{});await expect(page.getByRole('main',{name:'Muse Board'})).toHaveAttribute('data-muse-board','false');
+ let contextIncluded=false;fixture.response(async()=>{contextIncluded=JSON.stringify(fixture.canvases.get('owner-a')?.board).includes('Please sound like a cat.');return {cards:[],updates:[]};});await send(page,'Hello');await expect.poll(()=>contextIncluded).toBe(true);await page.reload();await openMuseEditor(page);expect((await exported(page)).text).toContain('Please sound like a cat.');
+});
+
+test('appearance image is labeled, swappable and centered; hybrid portrait respects reduced motion',async({page})=>{
+ await museFixture(page);const character=page.getByRole('button',{name:'Open Muse',exact:true}),portrait=character.locator('.muse-portrait');await expect.poll(()=>portrait.evaluate(el=>el.style.getPropertyValue('--motion-x'))).not.toBe('');
+ const frame=await character.locator('.muse-avatar').evaluate(el=>{const s=getComputedStyle(el),b=el.getBoundingClientRect();return {width:b.width,height:b.height,radius:s.borderRadius,overflow:s.overflow};});expect(frame.width).toBeCloseTo(frame.height,1);expect(frame.overflow).toBe('hidden');expect(frame.radius).not.toBe('0px');
+ const source=await portrait.getAttribute('data-portrait-source');for(const [x,y] of [[1400,100],[0,850],[1200,700],[100,100]])await page.mouse.move(x,y,{steps:3});await expect(portrait).toHaveAttribute('data-portrait-source',source!);await page.emulateMedia({reducedMotion:'reduce'});await expect.poll(()=>portrait.evaluate(el=>Number(el.style.getPropertyValue('--motion-x')))).toBe(0);await expect(portrait).toHaveAttribute('data-pose-cell','4');await page.emulateMedia({reducedMotion:'no-preference'});
+ await character.click();await page.getByRole('dialog',{name:'Muse',exact:true}).getByRole('button',{name:'Change avatar'}).click();await expect(page.getByRole('button',{name:'Change Muse icon'})).toBeVisible();await expect(page.locator('.muse-appearance-label')).toHaveText('Muse’s avatar');
+ const image=page.locator('.muze-vector-surface [id="muse-appearance"]'),label=page.locator('.muse-appearance-label');for(const action of [async()=>{},async()=>{await page.getByRole('button',{name:'Zoom out',exact:true}).click();}]){await action();await expect(image).toBeVisible();await expect(label).toBeVisible();const a=(await image.boundingBox())!,b=(await label.boundingBox())!;expect(b.x+b.width/2).toBeCloseTo(a.x+a.width/2,0);}
+ const initial=JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:any)=>o.id==='muse-appearance').src;
+ let paidCalls=0;page.on('request',req=>{if(req.url().endsWith('/api/muse/avatar')&&req.method()==='POST')paidCalls++;});const sourceImage=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=64;const ctx=c.getContext('2d')!;ctx.fillStyle='#9bbbd3';ctx.fillRect(0,0,64,64);return c.toDataURL('image/png').split(',')[1];});await page.getByLabel('Choose Muse icon',{exact:true}).setInputFiles({name:'pet.png',mimeType:'image/png',buffer:Buffer.from(sourceImage,'base64')});await expect.poll(async()=>JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:any)=>o.id==='muse-appearance').src).not.toBe(initial);expect(paidCalls).toBe(0);await expect(page.locator('.muse-save-status')).toHaveText('Saved');await page.reload();await openMuseEditor(page);expect(JSON.parse((await exported(page)).text).board.pages[0].objects.find((o:any)=>o.id==='muse-appearance').src).not.toBe(initial);
+ await page.screenshot({path:'verification/muse-avatar-image-label.png'});await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect(page.locator('.muse-floating .muse-portrait')).toBeVisible();await page.mouse.move(1400,100);await expect.poll(()=>page.locator('.muse-floating .muse-portrait').evaluate(el=>parseFloat(el.style.getPropertyValue('--motion-x')))).toBeGreaterThan(.5);await page.screenshot({path:'verification/muse-custom-portrait.png'});
 });

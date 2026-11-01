@@ -1,6 +1,7 @@
 export type Drawing = { objects: Record<string, unknown>[]; viewport: number[] };
 export type BoardPage = Drawing & { id: string; name: string };
-export type Board = { id: string; name: string; activePage: string; pages: BoardPage[] };
+export type BoardComment = { id:string; text:string; author:string; pageId?:string; x?:number; y?:number };
+export type Board = { id: string; name: string; activePage: string; pages: BoardPage[]; comments?: BoardComment[] };
 export type Workspace = { version: 1; activeBoard: string; boards: Board[] };
 export const uid = () => crypto.randomUUID();
 export const newPage = (name = 'Page 1'): BoardPage => ({ id: uid(), name, objects: [], viewport: [1, 0, 0, 1, 0, 0] });
@@ -35,7 +36,7 @@ export function saveStorage(db: IDBDatabase, workspace: Workspace): Promise<void
   });
 }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const allowedTypes = new Set(['Rect', 'Ellipse', 'Triangle', 'Polygon', 'Polyline', 'Line', 'Path', 'Textbox', 'IText', 'Text', 'Group', 'Image', 'MuzeArrow', 'MuzeNote', 'MuzeText', 'MuzeLabel', 'MuzeShape']);
+const allowedTypes = new Set(['Rect', 'Ellipse', 'Triangle', 'Polygon', 'Polyline', 'Line', 'Path', 'Textbox', 'IText', 'Text', 'Group', 'Image', 'MuzeArrow', 'MuzeNote', 'MuzeDocument', 'MuzeText', 'MuzeLabel', 'MuzeShape']);
 const color = (value: unknown) => value == null || typeof value === 'string' && /^(#[\da-f]{3,8}|rgba?\([\d.,% ]+\)|transparent|none|black|white|)$/i.test(value);
 const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1_000_000;
 function validTextStyle(style: unknown): boolean {
@@ -50,7 +51,9 @@ function validObject(value: unknown, depth = 0): boolean {
   if (value.src !== undefined && (typeof value.src !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,/i.test(value.src))) return false;
   if (['fill', 'stroke', 'backgroundColor'].some(key => value[key] != null && (typeof value[key] !== 'string' || !/^(#[\da-f]{3,8}|rgba?\([\d.,% ]+\)|transparent|none|black|white|)$/i.test(value[key] as string)))) return false;
   if (!validTextStyle(value) || !color(value.backgroundColor)) return false;
-  if (value.text !== undefined && (typeof value.text !== 'string' || value.text.length > 100000)) return false;
+  if (value.markdown !== undefined && (typeof value.markdown !== 'string' || value.markdown.length > 512000)) return false;
+  if (value.documentTitle !== undefined && (typeof value.documentTitle !== 'string' || value.documentTitle.length > 160)) return false;
+  if (value.text !== undefined && (typeof value.text !== 'string' || value.text.length > (value.type === 'MuzeDocument' ? 520000 : 100000))) return false;
   if (value.path !== undefined && value.path !== null) {
     const lengths: Record<string, number> = { M: 3, L: 3, H: 2, V: 2, C: 7, S: 5, Q: 5, T: 3, A: 8, Z: 1 };
     if (!Array.isArray(value.path) || value.path.length > 100000 || !value.path.every(part => Array.isArray(part) && part.length === lengths[String(part[0]).toUpperCase()] && part.slice(1).every(finite))) return false;
@@ -73,6 +76,7 @@ export function parseBoardFile(text: string): Board {
   if (!record(value) || value.format !== 'muze' || value.version !== 1 || !record(value.board)) throw new Error('Choose a valid Muse Board file.');
   const board = value.board;
   if (typeof board.name !== 'string' || !Array.isArray(board.pages) || !board.pages.length || board.pages.length > 100) throw new Error('This board file is incomplete.');
+  if (board.comments !== undefined && (!Array.isArray(board.comments) || board.comments.length > 100 || !board.comments.every(c => record(c) && typeof c.id === 'string' && typeof c.text === 'string' && c.text.length <= 4000 && typeof c.author === 'string' && (c.pageId === undefined || typeof c.pageId === 'string') && (c.x === undefined || typeof c.x === 'number' && Number.isFinite(c.x)) && (c.y === undefined || typeof c.y === 'number' && Number.isFinite(c.y))))) throw new Error('Invalid board comments.');
   const ids = new Set<string>();
   for (const page of board.pages) {
     if (!record(page) || typeof page.id !== 'string' || ids.has(page.id) || typeof page.name !== 'string' || !Array.isArray(page.objects) || page.objects.length > 10000 || !page.objects.every(item => validObject(item)) || !Array.isArray(page.viewport) || page.viewport.length !== 6 || !page.viewport.every(Number.isFinite) || page.viewport[0] < .1 || page.viewport[0] > 8) throw new Error('This board contains invalid drawing data.');

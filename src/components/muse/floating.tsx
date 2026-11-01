@@ -1,16 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { X, Pencil, ImagePlus, MessageCircle } from 'lucide-react';
 import { MuseIcon, type MuseProfile } from './shared';
 
 type Position = { x: number; y: number };
 export type Obstacle = Position & { id?: string; w: number; h: number };
 export type MuseActivity = { label: string; targetId?: string };
-type Props = { profile?: MuseProfile | null; open: () => void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
-const controls = '.muze-header,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
+type Props = { profile?: MuseProfile | null; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
+const controls = '.muze-header,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
 
-export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = false }: Props) {
+export function FloatingMuse({ profile, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
   const button = useRef<HTMLButtonElement>(null);
+  const popup = useRef<HTMLDivElement>(null), editButton = useRef<HTMLButtonElement>(null);
+  const [popupOpen, setPopupOpen] = useState(false);
+  useEffect(() => {
+    if (!popupOpen) return;
+    editButton.current?.focus();
+    const outside = (event: PointerEvent) => { if (!popup.current?.contains(event.target as Node) && !button.current?.contains(event.target as Node)) setPopupOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPopupOpen(false); button.current?.focus(); } };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape, true);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true); };
+  }, [popupOpen]);
   const [position, setPosition] = useState<Position>(() => ({ x: 24, y: typeof window === 'undefined' ? 400 : Math.max(110, innerHeight - 240) }));
   const [dragging, setDragging] = useState(false), [held, setHeld] = useState(false), [roaming, setRoaming] = useState(false);
   const point = useRef(position), latest = useRef({ obstacles, activity, chatOpen });
@@ -46,12 +58,17 @@ export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = fa
     const nearby = target ? [{ x: target.x - w - 24, y: target.y + 24 }, { x: target.x + target.w + 24, y: target.y + 24 }, { x: target.x, y: target.y - h - 24 }, { x: target.x, y: target.y + target.h + 24 }].map(clamp) : [];
     const score = (p: Position) => overlap(p) * 1000 + Math.hypot(p.x - preferred.x, p.y - preferred.y);
     const candidate = [preferred, ...nearby, ...spaces].sort((a, b) => score(a) - score(b))[0];
-    pendingHome.current = false;
     moveTo(candidate);
   }, [moveTo, scene]);
   useEffect(() => { const timer = setTimeout(settle, 450); return () => clearTimeout(timer); }, [obstacles, chatOpen, settle]);
   useEffect(() => {
-    if (activity.label) nextRoam.current = Date.now() + 8500;
+    // Tool expansion and composer growth change the available resting space.
+    const observer = new ResizeObserver(() => settle());
+    document.querySelectorAll('.muze-toolbar-dock,.muse-chat-stack').forEach(element => observer.observe(element));
+    return () => observer.disconnect();
+  }, [settle]);
+  useEffect(() => {
+    if (activity.label) { pendingHome.current = false; nextRoam.current = Date.now() + 8500; }
     else if (wasWorking.current) { pendingHome.current = true; nextRoam.current = Date.now() + 8500; }
     wasWorking.current = !!activity.label;
     settle();
@@ -65,7 +82,7 @@ export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = fa
       nextRoam.current = Date.now() + 8000;
       if (!(event.target as Element).closest('.muse-floating')) freeze();
     };
-    const up = () => { interacting.current = false; };
+    const up = () => { interacting.current = false; if (pendingHome.current) settle(); };
     const resize = () => { moveTo(bounds().clamp(point.current)); settle(); };
     const timer = setInterval(() => {
       if (reduced.current || document.hidden || drag.current || hovered.current || focused.current || interacting.current || latest.current.chatOpen || latest.current.activity.label || Date.now() < nextRoam.current || document.querySelector('[role="dialog"]')) return;
@@ -81,7 +98,7 @@ export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = fa
       const candidates = [preferred, ...spaces].filter(p => Math.hypot(p.x - from.x, p.y - from.y) > 35);
       candidates.sort((a, b) => score(a) - score(b));
       const candidate = candidates[0];
-      if (candidate && overlap(candidate) <= overlap(from)) moveTo(candidate, true);
+      if (candidate && overlap(candidate) <= overlap(from)) { pendingHome.current = false; moveTo(candidate, true); }
     }, 5500);
     preference.addEventListener('change', motion);
     window.addEventListener('resize', resize);
@@ -109,14 +126,14 @@ export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = fa
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     settle();
   }
-  return <button ref={button} type="button" className={'muse-floating' + (dragging ? ' dragging' : '') + (held ? ' held' : '') + (roaming ? ' roaming' : '') + (activity.label ? ' working' : '')} style={{ left: position.x, top: position.y }} aria-label="Talk to Muse" title="Muse — drag to move; click to talk"
+  return <><button ref={button} type="button" className={'muse-floating' + (dragging ? ' dragging' : '') + (held ? ' held' : '') + (roaming ? ' roaming' : '') + (activity.label ? ' working' : '')} style={{ left: position.x, top: position.y }} aria-label="Open Muse" aria-haspopup="dialog" aria-expanded={popupOpen} title="Muse — drag to move; click to open"
     onPointerEnter={() => { hovered.current = true; setHeld(true); if (!drag.current) freeze(); }}
     onPointerLeave={() => { hovered.current = false; release(); }}
     onFocus={event => { if (event.currentTarget.matches(':focus-visible')) { focused.current = true; setHeld(true); freeze(); } }}
     onBlur={() => { focused.current = false; release(); }}
     onPointerDown={event => {
       if (event.button !== 0 || drag.current) return;
-      event.stopPropagation(); freeze();
+      event.stopPropagation(); pendingHome.current = false; freeze();
       event.currentTarget.setPointerCapture(event.pointerId);
       moved.current = false; setDragging(true);
       drag.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, from: point.current, moved: false };
@@ -135,10 +152,16 @@ export function FloatingMuse({ profile, open, obstacles, activity, chatOpen = fa
       const delta: Record<string, Position> = { ArrowLeft: { x: -distance, y: 0 }, ArrowRight: { x: distance, y: 0 }, ArrowUp: { x: 0, y: -distance }, ArrowDown: { x: 0, y: distance } };
       if (delta[event.key]) { event.preventDefault(); moveTo(bounds().clamp({ x: point.current.x + delta[event.key].x, y: point.current.y + delta[event.key].y })); }
     }}
-    onClick={event => { event.stopPropagation(); if (event.detail === 0 || !moved.current) open(); moved.current = false; }}>
+    onClick={event => { event.stopPropagation(); if (event.detail === 0 || !moved.current) setPopupOpen(value => !value); moved.current = false; }}>
     <span className="muse-floating-shadow" aria-hidden="true"/>
     <MuseIcon profile={profile} followCursor/>
-    <span className="muse-floating-name">{profile?.muse.name || 'Muse'}<span className="muse-presence"/></span>
+    <span className="muse-floating-name">{profile?.muse.name || 'Muse'}</span>
     {activity.label && <span className="muse-floating-activity" role="status">{activity.label}</span>}
-  </button>;
+  </button>
+  {popupOpen && <div ref={popup} role="dialog" aria-label="Muse" className="muse-character-popup" style={{left:Math.max(12,Math.min(innerWidth-232,position.x+100)),top:Math.max(76,Math.min(innerHeight-230,position.y))}} onKeyDown={event=>event.stopPropagation()}>
+    <header><strong>{profile?.muse.name || 'Muse'}</strong><button aria-label="Close Muse popup" onClick={()=>{setPopupOpen(false);button.current?.focus();}}><X size={16}/></button></header>
+    <button ref={editButton} className="muse-popup-edit" onClick={()=>{setPopupOpen(false);open();}}><Pencil size={15}/>Edit Muse</button>
+    <button className="muse-popup-edit" onClick={()=>{setPopupOpen(false);(changeAvatar||open)();}}><ImagePlus size={15}/>Change avatar</button>
+    <button className="muse-popup-edit" onClick={()=>{setPopupOpen(false);(chat||open)();}}><MessageCircle size={15}/>Chat</button>
+  </div>}</>;
 }
