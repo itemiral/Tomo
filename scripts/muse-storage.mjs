@@ -99,7 +99,7 @@ export async function withMuseLease(ownerId, resource, operation) {
     return await leases.run([...(leases.getStore() || []), { resource, token }], operation);
   } finally {
     // An interrupted request leaves a bounded lease; it never unlocks a newer worker.
-    await current.client.rpc('release_muse_lease', { resource, lease_token: token }).catch(() => {});
+    await Promise.resolve(current.client.rpc('release_muse_lease', { resource, lease_token: token })).catch(() => {});
   }
 }
 

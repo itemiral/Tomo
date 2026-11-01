@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
+import { createClient } from '@supabase/supabase-js';
 const localDirectory = await mkdtemp(join(tmpdir(), 'muze-cloud-test-'));
 process.env.MUZE_PRIVATE_DIR = localDirectory;
 const { withMuseStorage, withStorageTransaction, withMuseLease, readFile, writeFile, usesCloudStorage, migrateLocalMuse } = await import('../scripts/muse-storage.mjs');
@@ -161,4 +162,20 @@ test('local migration preserves identity and operation history without overwriti
   assert.equal(await cloud(owner, () => readFile(join(museDirectory(owner), 'avatar-operations.json'), 'utf8')), history);
   assert.equal((await readMuseNote(owner, 'soul')).content, 'My existing Muse');
   await assert.rejects(migrateLocalMuse(owner, client(owner)), { status: 409 });
+});
+
+test('lease cleanup works with the real SDK query builder and preserves the operation result', async () => {
+  const calls = [];
+  const sdk = createClient('https://workspace.example', 'public-test-key', {
+    accessToken: async () => 'test-session',
+    global: { fetch: async input => {
+      const name = new URL(String(input)).pathname.split('/').at(-1);
+      calls.push(name);
+      return new Response(JSON.stringify(name === 'acquire_muse_lease' ? true : null), { headers: { 'Content-Type': 'application/json' } });
+    } },
+  });
+  const result = await withMuseStorage('user_sdk', sdk, () => withMuseLease('user_sdk', 'chat', async () => 'Completed response'));
+  assert.equal(result, 'Completed response');
+  assert.deepEqual(calls, ['acquire_muse_lease', 'release_muse_lease']);
+  await assert.rejects(withMuseStorage('user_sdk', sdk, () => withMuseLease('user_sdk', 'chat', async () => { throw new Error('Original failure'); })), /Original failure/);
 });
