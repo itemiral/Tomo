@@ -15,6 +15,7 @@ import { CanvasTooltips } from './tooltips';
 import { useSharedBoard } from './use-shared-board';
 import { SharePanel } from './share-panel';
 import { useBoardPresence } from './use-board-presence';
+import { useBoardProfiles } from './use-board-profiles';
 import { BoardParticipants, BoardPeerCursors, BoardPeerMuses } from './board-presence';
 import './whiteboard.css';
 import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
@@ -155,6 +156,7 @@ export default function MuzeEditor() {
   const active = museOpen ? museCanvas.board : shared.boardId ? shared.board : ordinary;
   const page = active?.pages.find(item => item.id === active.activePage);
   const presence = useBoardPresence({boardId:shared.board?.id,userId:isSignedIn?user?.id:undefined,name:user?.firstName||user?.username||'Guest',pageId:page?.id,viewport:editor.viewport,enabled:!!shared.board&&!museOpen&&!!isSignedIn,museWorking});
+  const participantProfiles=useBoardProfiles({boardId:shared.board?.id,userId:isSignedIn?user?.id:undefined,enabled:!!shared.board&&!museOpen&&!!isSignedIn,connected:presence.connected,peerIds:presence.peers.map(person=>person.userId),profileVersion:JSON.stringify([user?.firstName,user?.username,user?.imageUrl])});
   useEffect(() => { if (active) setName(active.name); }, [active?.id, active?.name]);
   const updateBoard = useCallback((update: (board: Board) => Board) => {
     if (museActive.current) { museCanvas.update(update); return; }
@@ -273,7 +275,7 @@ export default function MuzeEditor() {
     <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>
     {editor.guides.length > 0 && <svg className="muze-snap-guides" aria-hidden="true"><g transform={`translate(${editor.viewport[4]} ${editor.viewport[5]}) scale(${editor.zoom})`}>{editor.guides.map((line, index) => <line key={index} {...line} stroke="#e44b7a" strokeWidth={1 / editor.zoom} strokeDasharray={`${4 / editor.zoom} ${4 / editor.zoom}`}/>)}</g></svg>}
     <header className="muze-header">
-      {!museOpen&&shared.board&&<BoardParticipants peers={presence.peers} userId={user?.id} connected={presence.connected}/>}
+      {!museOpen&&shared.board&&<BoardParticipants profiles={participantProfiles} peers={presence.peers} userId={user?.id} connected={presence.connected}/>}
       <div className="muze-project">
         <span className="muze-brand"><span>Muze</span></span>
         {museOpen && <Button label="Back to whiteboard" onClick={leaveMuse}><ArrowLeft size={17}/></Button>}<Button label="Main menu" onClick={() => togglePopup('menu')} active={popup === 'menu'}><Menu size={17}/></Button>
@@ -336,7 +338,7 @@ export default function MuzeEditor() {
     {editor.items.map(item=>{const object=page.objects.find(o=>o.id===item.id);const url=typeof object?.sourceUrl==='string'&&/^https:\/\//.test(object.sourceUrl)?object.sourceUrl:null;return url?<a key={'source-'+item.id} className="muse-image-source" data-muse-ui="true" href={url} target="_blank" rel="noopener noreferrer" style={{left:item.x*editor.zoom+editor.viewport[4],top:(item.y+item.h)*editor.zoom+editor.viewport[5]+5}}>Source: {String(object?.sourceTitle||'image')}{object?.attribution?' · '+String(object.attribution):''}</a>:null;})}
     {museOpen&&engine.current?.museNameSelected()&&editor.items.filter(item=>item.id==='muse-name').map(item=><NameOnCanvas key={item.id} name={String((museCanvas.board as Board & {museName?:string})?.museName||'Muse')} left={item.x*editor.zoom+editor.viewport[4]} top={item.y*editor.zoom+editor.viewport[5]} zoom={editor.zoom} save={name=>{engine.current?.renameMuse(name);}} cancel={()=>engine.current?.clearSelection()}/>)}
     {museOpen&&editor.items.filter(item=>item.id==='muse-appearance').map(item=><div key={item.id} className="muse-appearance-label" aria-label="Muse’s avatar. Select the image to replace it." style={{left:(item.x+item.w/2)*editor.zoom+editor.viewport[4],top:(item.y+item.h)*editor.zoom+editor.viewport[5]+8,width:Math.max(120,item.w*editor.zoom),transform:'translateX(-50%)'}}><span>{String((museCanvas.board as Board & {museName?:string})?.museName||'Muse')}’s avatar</span></div>)}
-    {!museOpen&&shared.board&&<><BoardPeerCursors cursors={presence.cursors} pageId={page.id} viewport={editor.viewport}/><BoardPeerMuses peers={presence.peers} userId={user?.id} pageId={page.id}/></>}
+    {!museOpen&&shared.board&&<><BoardPeerCursors profiles={participantProfiles} cursors={presence.cursors} pageId={page.id} viewport={editor.viewport}/><BoardPeerMuses profiles={participantProfiles} peers={presence.peers} userId={user?.id} pageId={page.id}/></>}
     <CanvasComments key={active.id+page.id} comments={active.comments||[]} pageId={page.id} firstPageId={active.pages[0].id} viewport={editor.viewport} placement={commentPlacement} save={comments=>updateBoard(board=>({...board,comments}))}/>
     {!museOpen&&shared.board&&shared.error&&<div className="muse-save-error" role="alert">{shared.error}{shared.conflict?<><button onClick={saveFile}>Save a copy</button><button onClick={shared.reload}>Reload shared version</button></>:<button onClick={()=>void shared.flush().catch(()=>{})}>Retry save</button>}</div>}
     {museOpen && <><div className="muse-save-status" role="status">{museCanvas.status}</div>{museCanvas.error && <div className="muse-save-error" role="alert">{museCanvas.error}<button onClick={()=>void museCanvas.flush().catch(()=>{})}>Retry save</button></div>}</>}

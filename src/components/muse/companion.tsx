@@ -42,6 +42,7 @@ function OwnedMuse({attachImage,onActivity,historyControls,appearanceSelected,op
       await appearanceChanged?.();
       if(generation!==ownerVersion.current||abort.signal.aborted)return;
       setProfile(p=>p?{...p,muse:{...p.muse,...result}}:p);
+      window.dispatchEvent(new CustomEvent('muse-appearance-saved',{detail:{ownerId:userId}}));
       setRetryFile(null);lastOperation.current=null;setAvatarState('idle');setAvatarStatus('Avatar updated.');
     };
     try{
