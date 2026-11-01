@@ -4,10 +4,11 @@ import { useClerk, useUser } from '@clerk/nextjs';
 import { ArrowUp, Pencil } from 'lucide-react';
 import { MuseIcon, museRequest as request, RequestError, type MuseProfile } from './shared';
 import { MuseChat } from './chat';
+import { normalizeAvatarImage } from './avatar-upload';
 import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import './muse.css';
-type Props={historyControls?:ReactNode;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;addToBoard:(text:string)=>void;applyActions:(actions:MuseActions)=>MuseApplyResult};
+type Props={onActivity?:(working:boolean)=>void;historyControls?:ReactNode;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;addToBoard:(text:string)=>void;applyActions:(actions:MuseActions)=>MuseApplyResult};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
@@ -15,8 +16,10 @@ export function MuseCompanion(props:Props) {
  if(!isSignedIn||!user)return <div data-muse-ui="true" className="muse-interface"><FloatingMuse obstacles={props.obstacles} activity={{label:''}} open={()=>{if(isLoaded)clerk.openSignIn();}}/><div className="muse-chat-stack">{props.historyControls}<form className="muse-inline-guest" onSubmit={e=>{e.preventDefault();if(isLoaded)clerk.openSignIn();}}><input aria-label="Message Muse" placeholder="A thought, a question…" value={guestText} onChange={e=>setGuestText(e.target.value)} onKeyDown={e=>e.stopPropagation()}/><button aria-label="Send to Muse" disabled={!isLoaded}><ArrowUp size={17}/></button></form></div></div>;
  return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
-function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,addToBoard,applyActions,userId}:Props&{userId:string}) {
+function OwnedMuse({onActivity,historyControls,appearanceSelected,appearanceAnchor,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,addToBoard,applyActions,userId}:Props&{userId:string}) {
  const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[iconBusy,setIconBusy]=useState(false),[chatOpen,setChatOpen]=useState(false),[avatarStatus,setAvatarStatus]=useState(''),[retryFile,setRetryFile]=useState<File|null>(null),[activity,setActivity]=useState<MuseActivity>({label:''});
+ useEffect(()=>{onActivity?.(!open&&!!activity.label);},[onActivity,open,activity.label]);
+ useEffect(()=>()=>onActivity?.(false),[onActivity]);
  useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
  const avatarRequest=useRef<AbortController|null>(null),lastOperation=useRef<string|null>(null);
  useEffect(()=>()=>avatarRequest.current?.abort(),[]);
@@ -39,8 +42,7 @@ function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppe
     const generation=ownerVersion.current,abort=new AbortController();avatarRequest.current=abort;
     setIconBusy(true);setError('');setAvatarStatus('Generating your avatar…');setRetryFile(file);
     try{
-      if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)||file.size>10_000_000)throw new Error('Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
-      const source=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Could not read that image.'));reader.readAsDataURL(file);});
+      const source=await normalizeAvatarImage(file,abort.signal);
       if(abort.signal.aborted)return;
       const operationId=crypto.randomUUID();lastOperation.current=operationId;
       const result=await request<Partial<MuseProfile['muse']>>('avatar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'replace',source,operationId,confirmCost:true,shareWithMeta:true,maxCostUsd:.01}),signal:abort.signal});

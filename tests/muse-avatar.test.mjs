@@ -19,6 +19,14 @@ test('avatar retains exact source, isolates owners and validates image data', as
  await assert.rejects(uploadAvatar('a','data:image/png;base64,AAAA'), /decoded/);
  assert.equal((await readAvatar('a')).source,source);
 });
+test('oversized avatar uploads are rejected before storage or generation', async () => {
+ const { replaceAvatar } = await import('../scripts/muse-avatar.mjs');
+ const { randomUUID } = await import('node:crypto');
+ const oversized = 'data:image/png;base64,' + 'A'.repeat(3_800_000);
+ await assert.rejects(uploadAvatar('oversized', oversized), /smaller/);
+ await assert.rejects(replaceAvatar('oversized', { source: oversized, operationId: randomUUID(), confirmCost: true, maxCostUsd: .01, shareWithMeta: true }, new AbortController().signal, () => { throw new Error('Must not generate'); }), /smaller/);
+ assert.equal(await readAvatar('oversized'), null);
+});
 test('generation requires exact cost and source approval; failures preserve avatar',async()=>{
  const original=await uploadAvatar('generation',source); let calls=0;
  const fail=async()=>{calls++;return {ok:false,status:503}};

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile as readDiskFile, readdir, mkdtemp, rm, writeFile as writeDiskFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
+import sharp from 'sharp';
 import { PGlite } from '@electric-sql/pglite';
 import { createClient } from '@supabase/supabase-js';
 const localDirectory = await mkdtemp(join(tmpdir(), 'muze-cloud-test-'));
@@ -11,6 +12,7 @@ process.env.MUZE_PRIVATE_DIR = localDirectory;
 const { withMuseStorage, withStorageTransaction, withMuseLease, readFile, writeFile, usesCloudStorage, migrateLocalMuse } = await import('../scripts/muse-storage.mjs');
 const { museDirectory, readMuseNote, saveMuseNote, ensureMuse } = await import('../scripts/muse-store.mjs');
 const { readMuseCanvas, saveMuseCanvas } = await import('../scripts/muse-canvas.mjs');
+const { replaceAvatar, readAvatar, uploadAvatar } = await import('../scripts/muse-avatar.mjs');
 
 const db = new PGlite();
 await db.exec(`
@@ -196,4 +198,78 @@ test('lease cleanup works with the real SDK query builder and preserves the oper
   assert.equal(result, 'Completed response');
   assert.deepEqual(calls, ['acquire_muse_lease', 'release_muse_lease']);
   await assert.rejects(withMuseStorage('user_sdk', sdk, () => withMuseLease('user_sdk', 'chat', async () => { throw new Error('Original failure'); })), /Original failure/);
+});
+
+test('a large avatar persists through one database timeout without repeating generation', async () => {
+  process.env.MODEL_API_KEY = 'fixture-only-not-a-real-key';
+  const owner = 'user_avatar_timeout', connection = client(owner), original = connection.rpc;
+  const sourceBytes = await sharp(randomBytes(512 * 512 * 3), { raw: { width: 512, height: 512, channels: 3 } }).png().toBuffer();
+  const sheet = await sharp(randomBytes(768 * 768 * 3), { raw: { width: 768, height: 768, channels: 3 } }).png().toBuffer();
+  let commits = 0, generations = 0, initialArguments;
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files' && args.changes.some(change => change.name === 'avatar.json')) {
+      commits++;
+      if (commits === 1) { initialArguments = JSON.stringify(args); return { error: { code: '57014', message: 'Statement timeout' } }; }
+      assert.equal(JSON.stringify(args), initialArguments, 'retry must preserve the expected versions and lease');
+    }
+    return original(name, args);
+  };
+  const body = { source: 'data:image/png;base64,' + sourceBytes.toString('base64'), operationId: randomUUID(), confirmCost: true, maxCostUsd: .01, shareWithMeta: true };
+  const result = await withMuseStorage(owner, connection, () => replaceAvatar(owner, body, new AbortController().signal, async () => {
+    generations++;
+    return { ok: true, json: async () => ({ data: [{ b64_json: sheet.toString('base64') }] }) };
+  }));
+  assert.equal(result.status, 'completed');
+  assert.equal(commits, 2);
+  assert.equal(generations, 1);
+  const saved = await cloud(owner, () => readAvatar(owner));
+  assert.equal(saved.source, body.source);
+  assert.equal(saved.activeVersion, result.gazeVersion);
+  assert.ok(saved.activeSheet.length > 1_000_000);
+});
+
+test('a second timeout stops the exact write retry and logs no private document contents', async () => {
+  process.env.MODEL_API_KEY = 'fixture-only-not-a-real-key';
+  const owner = 'user_timeout_bounded', connection = client(owner);
+  const png = await sharp({ create: { width: 768, height: 768, channels: 3, background: '#334455' } }).png().toBuffer();
+  const source = 'data:image/png;base64,' + png.toString('base64');
+  const previous = await cloud(owner, () => uploadAvatar(owner, source));
+  let commits = 0, generations = 0;
+  const original = connection.rpc, originalError = console.error, originalWarn = console.warn, logs = [];
+  console.error = (...args) => logs.push(args);
+  console.warn = (...args) => logs.push(args);
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files' && args.changes.some(change => change.name === 'avatar.json')) {
+      commits++;
+      return { error: { code: '57014', message: 'Private document text must not enter logs', details: args } };
+    }
+    return original(name, args);
+  };
+  try {
+    await assert.rejects(withMuseStorage(owner, connection, () => replaceAvatar(owner, {
+      source, operationId: randomUUID(), confirmCost: true, maxCostUsd: .01, shareWithMeta: true,
+    }, new AbortController().signal, async () => {
+      generations++;
+      return { ok: true, json: async () => ({ data: [{ b64_json: png.toString('base64') }] }) };
+    })), { status: 503, code: '57014' });
+  } finally { console.error = originalError; console.warn = originalWarn; }
+  assert.equal(commits, 2);
+  assert.equal(generations, 1);
+  const unchanged = await cloud(owner, () => readAvatar(owner));
+  assert.equal(unchanged.version, previous.iconVersion);
+  assert.equal(unchanged.active, false);
+  assert.equal(unchanged.activeSheet, undefined);
+  assert.doesNotMatch(JSON.stringify(logs), /Private document|source-image|user_timeout/);
+  assert.ok(logs.some(args => args[1]?.code === '57014'));
+});
+
+test('an uncertain transport failure is never retried', async () => {
+  const owner = 'user_transport_unknown', connection = client(owner), original = connection.rpc;
+  let commits = 0;
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files') { commits++; return { error: { code: '', message: 'Connection lost after sending' } }; }
+    return original(name, args);
+  };
+  await assert.rejects(withMuseStorage(owner, connection, () => writeFile(join(museDirectory(owner), 'avatar.json'), '{}')), { status: 503 });
+  assert.equal(commits, 1);
 });

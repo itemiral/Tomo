@@ -21,7 +21,7 @@ export async function PUT(request: NextRequest) {
   try {
     checkOrigin(request, true);
     return await withOwner(request, async profile => {
-    const body = await jsonBody(request, 14_000_000);
+    const body = await jsonBody(request, 4_000_000);
     if (body.action === 'activate') return privateJson(await activateAvatar(profile.ownerId, body.version));
     if (body.source) return privateJson(await uploadAvatar(profile.ownerId, body.source));
     return privateJson({ iconVersion: await updateIcon(profile, body.image) });
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   try {
     checkOrigin(request, true);
     return await withOwner(request, async profile => {
-    const body = await jsonBody(request, 14_000_000);
+    const body = await jsonBody(request, 4_000_000);
     if(body.action==='replace')return privateJson(await replaceAvatar(profile.ownerId,body,request.signal));
     return privateJson({error:'Choose Replace image to generate and apply an avatar.'},400);
     });

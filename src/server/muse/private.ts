@@ -6,6 +6,7 @@ import { ensureMuse, MuseStoreError, readMuseIcon, readMuseNote, saveMuseIcon, s
 import { readAvatar, avatarSummary } from '../../../scripts/muse-avatar.mjs';
 import { PrivateError } from './error';
 import { createAuthenticatedClient } from '@/utils/supabase/shared';
+import { serverSessionToken } from '@/utils/supabase/session';
 import { StorageError, usesCloudStorage, withMuseStorage } from '../../../scripts/muse-storage.mjs';
 export { PrivateError } from './error';
 export type NoteKey = 'soul' | 'memory';
@@ -36,11 +37,11 @@ export async function owner(request: NextRequest): Promise<{ profile: Profile }>
 
 export async function withOwner<T>(request: NextRequest, operation: (profile: Profile) => Promise<T>): Promise<T> {
   checkOrigin(request);
-  const { userId, getToken } = await auth();
+  const { userId, sessionId, getToken } = await auth();
   if (!userId) throw new PrivateError(401, 'Sign in to open your Muse.');
   const profile = { ownerId: userId };
   if (!usesCloudStorage()) return operation(profile);
-  const client = createAuthenticatedClient(() => getToken());
+  const client = createAuthenticatedClient(serverSessionToken(userId, sessionId, () => getToken()));
   return withMuseStorage(userId, client, () => operation(profile));
 }
 

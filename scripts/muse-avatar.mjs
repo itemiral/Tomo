@@ -22,7 +22,7 @@ async function writeAvatar(owner, avatar) {
 export function avatarSummary(a) { return a ? { iconVersion: a.version, gazeVersion: a.activeVersion || (a.active ? a.candidateVersion : null), candidateVersion: a.candidateVersion || null } : {}; }
 export async function uploadAvatar(owner, source) {
   return exclusive(owner, async () => {
-    if (typeof source !== 'string' || source.length > 13_400_000 || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)) throw new MuseStoreError(400, 'Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
+    if (typeof source !== 'string' || source.length > 3_800_000 || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)) throw new MuseStoreError(400, 'Choose a smaller PNG, JPEG, WebP, or GIF.');
     const bytes = Buffer.from(source.split(',')[1], 'base64');
     let preview;
     try { preview = await sharp(bytes, { limitInputPixels: 25_000_000, animated: false }).rotate().resize(256, 256, { fit: 'contain', background: '#f9fafb' }).png().toBuffer(); }
@@ -88,7 +88,7 @@ export async function replaceAvatar(owner,body,signal,fetcher=fetch){
   if(previous?.operationId===body.operationId)return {status:'completed',...avatarSummary(previous)};
   if(existing)throw new MuseStoreError(409,'This attempt was already submitted. Check its status before starting another attempt.');
   const source=body.source;
-  if(typeof source!=='string'||source.length>13_400_000||!/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source))throw new MuseStoreError(400,'Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
+  if(typeof source!=='string'||source.length>3_800_000||!/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source))throw new MuseStoreError(400,'Choose a smaller PNG, JPEG, WebP, or GIF.');
   const bytes=Buffer.from(source.split(',')[1],'base64');let preview;
   try{preview=await sharp(bytes,{limitInputPixels:25_000_000,animated:false}).rotate().resize(256,256,{fit:'contain',background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();}catch{throw new MuseStoreError(400,'That image could not be decoded.');}
   const budget=Number(process.env.MUSE_AVATAR_DAILY_BUDGET_USD??'.10'),day=new Date().toISOString().slice(0,10);

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import * as disk from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { digest, privateDirectory } from './muse-local.mjs';
 
 const requests = new AsyncLocalStorage();
@@ -41,9 +42,11 @@ function fileName(path, current, allowDirectory = false) {
   return name;
 }
 
-function databaseError(error) {
+function databaseError(error, operation) {
   if (['PT409', '40001'].includes(error.code)) return new StorageError(409, 'This notebook changed elsewhere. Reload before saving.', error.code);
-  if (error.status === 401 || error.name === 'SupabaseSessionError' || error.code === '42501' || error.code === 'PGRST301' || error.code === 'PGRST303') return new StorageError(401, 'Sign in again to open your Muse.', error.code);
+  if (error.status === 401 || error.name === 'SupabaseSessionError' || error.message?.startsWith('SupabaseSessionError:') || error.code === '42501' || error.code === 'PGRST301' || error.code === 'PGRST303') return new StorageError(401, 'Sign in again to open your Muse.', error.code);
+  // Database details can contain document data. Log only fixed operation names and error codes.
+  console.error('Muse storage request failed', { operation, code: /^(?:[A-Z0-9]{5}|PGRST\d{3})$/.test(error.code || '') ? error.code : 'transport' });
   return new StorageError(503, 'Muse storage is unavailable. Try again.', error.code);
 }
 
@@ -52,7 +55,7 @@ async function row(name, current) {
   if (transaction?.rows.has(name)) return transaction.rows.get(name);
   const { data, error } = await current.client.from('muse_private_files')
     .select('name,content,version,updated_at').eq('owner_id', current.ownerId).eq('name', name).maybeSingle();
-  if (error) throw databaseError(error);
+  if (error) throw databaseError(error, 'read_file');
   const value = data || { name, content: null, version: null, updated_at: null };
   transaction?.rows.set(name, value);
   return value;
@@ -64,10 +67,18 @@ async function commit(current, transaction) {
     name: value.name, expected_version: value.version,
     ...(transaction.writes.has(value.name) ? { content: transaction.writes.get(value.name) } : {}),
   }));
-  const { error } = await current.client.rpc('commit_muse_files', {
+  const arguments_ = {
     changes, held_leases: leases.getStore() || [],
-  });
-  if (error) throw databaseError(error);
+  };
+  for (let attempt = 0; ; attempt++) {
+    const { error } = await current.client.rpc('commit_muse_files', arguments_);
+    if (!error) return;
+    if (error.code !== '57014' || attempt > 0) throw databaseError(error, 'commit_files');
+    // A statement timeout rolls the database transaction back. Retry the same fenced
+    // write once; never rerun the operation that may already have generated an image.
+    console.warn('Muse storage commit retry', { code: '57014' });
+    await delay(150);
+  }
 }
 
 export async function withStorageTransaction(operation, retries = 0) {
@@ -93,7 +104,7 @@ export async function withMuseLease(ownerId, resource, operation) {
   if (current.ownerId !== ownerId) throw new StorageError(403, 'This Muse belongs to another owner.');
   const token = randomUUID();
   const { data, error } = await current.client.rpc('acquire_muse_lease', { resource, lease_token: token });
-  if (error) throw databaseError(error);
+  if (error) throw databaseError(error, 'acquire_lease');
   if (!data) throw new StorageError(409, 'Muse is still working. Try again in a moment.');
   try {
     return await leases.run([...(leases.getStore() || []), { resource, token }], operation);
