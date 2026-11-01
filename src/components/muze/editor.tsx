@@ -346,6 +346,6 @@ export default function MuzeEditor() {
       const now = current.current, board = museActive.current ? privateBoardRef.current : sharedRef.current.board || now?.boards.find(board => board.id === now.activeBoard);
       if (!board || board.id !== active.id || board.activePage !== page.id) return { ids: [], skipped: actions.cards.length + actions.updates.length };
       return engine.current?.applyMuseActions(actions) || { ids: [], skipped: actions.cards.length + actions.updates.length };
-    }} addToBoard={text => engine.current?.addMuseText(text)} open={museOpen} onOpenChange={setMuseOpen} obstacles={editor.items.map(box => ({ id: box.id, x: box.x * editor.zoom + editor.viewport[4], y: box.y * editor.zoom + editor.viewport[5], w: box.w * editor.zoom, h: box.h * editor.zoom }))}/>
+    }} open={museOpen} onOpenChange={setMuseOpen} obstacles={editor.items.map(box => ({ id: box.id, x: box.x * editor.zoom + editor.viewport[4], y: box.y * editor.zoom + editor.viewport[5], w: box.w * editor.zoom, h: box.h * editor.zoom }))}/>
   </main>;
 }

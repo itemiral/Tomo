@@ -112,7 +112,13 @@ test('Muse moves to its work, adds spaced editable notes, and returns to its res
 
 test('follow-ups update the same plan and preserve edits made while Muse answers', async ({ page }) => {
   const fixture = await museFixture(page);
-  await chat(page); await send(page);
+  const expectDirectChat = async () => {
+    await expect(page.locator('.muse-task-panel')).toHaveCount(0);
+    await expect(page.getByText('Work through a task', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Add to board', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Attach image', exact: true })).toBeVisible();
+  };
+  await chat(page); await expectDirectChat(); await send(page);
   await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
   const plan = await exported(page), first = plan.objects[0], second = plan.objects[1];
   let release!: () => void;
@@ -129,6 +135,14 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
   expect(updated.objects).toHaveLength(3);
   expect(updated.objects.find(object => object.id === first.id)?.text).toBe('My newer edit');
   expect(updated.objects.find(object => object.id === second.id)?.text).toContain('Updated resources');
+  await expectDirectChat();
+  await page.reload(); await chat(page);
+  await expect(page.locator('.muse-message.assistant')).toHaveCount(2);
+  await expectDirectChat();
+  const restored = await exported(page);
+  expect(restored.objects).toHaveLength(3);
+  expect(restored.objects.find(object => object.id === first.id)?.text).toBe('My newer edit');
+  expect(restored.objects.find(object => object.id === second.id)?.text).toContain('Updated resources');
 });
 
 test('custom icons and the private editor work on a narrow screen', async ({ page }) => {
@@ -398,23 +412,6 @@ test('renaming Muse updates the canonical soul identity and undoes both together
  await page.reload();await openMuseEditor(page);await expect(soul).toContainText('My name is Luna.');
  const box=(await soul.boundingBox())!;await page.mouse.dblclick(box.x+70,box.y+110);
  const input=page.locator('textarea[data-fabric="textarea"]');await expect(input).toHaveValue(expected('Luna'));await input.press('Escape');
-});
-
-test('tasks research automatically without a toggle and reload',async({page})=>{
- const creates:Record<string,unknown>[]=[];
- page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/api/muse/tasks'){const body=request.postDataJSON();if(body.action==='create')creates.push(body);}});
- await museFixture(page);await chat(page);
- await page.getByRole('textbox',{name:'Message Muse'}).fill('Plan a small garden');
- await page.getByText('Work through a task',{exact:true}).click();
- await expect(page.locator('.muse-task-panel').getByRole('checkbox')).toHaveCount(0);
- await expect(page.getByText('Research the public web',{exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Run task from message'}).click();
- await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
- expect(creates).toHaveLength(1);expect(creates[0]).toMatchObject({goal:'Plan a small garden',research:true});
- await page.reload();await chat(page);await page.getByText('Work through a task',{exact:true}).click();
- await expect(page.locator('.muse-task-panel')).toContainText('Plan a small garden');
- await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
- await expect(page.locator('.muse-task-panel').getByRole('checkbox')).toHaveCount(0);
 });
 
 test('automatic replacement uses image feedback, preserves the avatar on failure and only retries explicitly',async({page})=>{

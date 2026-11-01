@@ -97,7 +97,6 @@
 .muse-chat-messages{min-height:180px;max-height:430px;overflow-y:auto;padding:16px;scrollbar-width:thin;touch-action:pan-y;overscroll-behavior:contain}
 .muse-chat-intro{font-size:13px;color:var(--muted);margin:32px 10px;text-align:center}
 .muse-message{font-size:12px;line-height:1.7;margin-bottom:20px;user-select:text}.muse-message.user{padding:9px 12px;background:var(--hover);border-radius:10px;margin-left:25px}.muse-message p:last-child{margin-bottom:0}.muse-message h1{font-size:18px}.muse-message h2{font-size:16px}.muse-message h3{font-size:14px}
-.muse-add-reply{display:inline-flex;align-items:center;gap:5px;padding:4px 0!important;color:var(--muted)!important;font-size:10px!important;margin-top:8px}.muse-add-reply:hover{color:var(--blue)!important}
 .muse-chat>form{display:flex;gap:8px;align-items:flex-end;padding:10px;border-top:1px solid var(--line);background:var(--panel)}
 .muse-chat textarea{resize:none;height:58px;min-width:0;flex:1;border:0;background:transparent;color:var(--ink);font:12px/1.6 Inter,sans-serif;outline:none;padding:6px}.muse-chat textarea::placeholder{color:var(--muted)}
 .muse-chat>form>button{display:grid;place-items:center;width:29px;height:29px;margin-bottom:4px;background:var(--blue);color:#fff;border-radius:8px;flex-shrink:0}.muse-chat-error{font-size:11px;color:#b2635b;padding:0 16px}
@@ -183,7 +182,6 @@
 
 .muse-history-controls{max-width:100%;flex-wrap:wrap;justify-content:center}.muse-history-controls .muze-divider{height:18px;align-self:center}
 
-.muse-task-panel{padding:8px 14px;font-size:11px;max-height:220px;overflow:auto}.muse-task-panel summary{cursor:pointer;color:var(--muted)}.muse-task-panel p{line-height:1.5}.muse-task-panel button{padding:5px 8px;border:1px solid var(--line);border-radius:7px;margin:4px}
 .muse-chat>form>button.muse-chat-attach{background:transparent;color:var(--muted);border:1px solid var(--line)}.muse-chat>form>button.muse-chat-attach:hover:not(:disabled){background:var(--hover);color:var(--ink)}.muse-chat>form>button.muse-chat-attach:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.muse-chat>form>button.muse-chat-attach:disabled{opacity:.5}
 
 .muse-name-editor{position:absolute;z-index:25;background:var(--canvas);padding:2px;font:24px/1.4 Inter;white-space:nowrap}.muse-name-editor input{font:inherit;width:160px;border:0;border-bottom:1px solid var(--blue);background:transparent;color:var(--ink)}.muse-name-editor button{font:12px Inter;margin-left:8px;color:var(--blue)}.muse-name-editor p{font:12px Inter;white-space:normal;max-width:400px}
