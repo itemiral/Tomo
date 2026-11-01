@@ -96,6 +96,87 @@ test('cloud notebooks survive requests and keep each owner’s canonical files p
   assert.deepEqual(visible.rows, [{ owner_id: 'user_bob' }]);
 });
 
+test('a cloud rename commits the name and soul together and keeps the other owner unchanged', async () => {
+  const owner = 'user_cloud_rename', other = 'user_cloud_rename_other';
+  const snapshot = await cloud(owner, () => readMuseCanvas(owner));
+  const otherBefore = await cloud(other, () => readMuseNote(other, 'soul'));
+  const memoryBefore = await cloud(owner, () => readMuseNote(owner, 'memory'));
+  const soulBefore = await cloud(owner, () => readMuseNote(owner, 'soul'));
+  snapshot.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Kumo.';
+  const connection = client(owner), original = connection.rpc, commits = [];
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files') commits.push(args.changes.filter(change => Object.hasOwn(change, 'content')).map(change => change.name).sort());
+    return original(name, args);
+  };
+  await withMuseStorage(owner, connection, () => saveMuseCanvas(owner, snapshot));
+  assert.deepEqual(commits, [['canvas.json', 'soul.md']], 'name and soul must be written in one database transaction');
+  assert.equal((await cloud(owner, () => ensureMuse(owner))).name, 'Kumo');
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, soulBefore.content.replace('I’m Muse,', 'I’m Kumo,'));
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'memory'))).content, memoryBefore.content);
+  assert.deepEqual(await cloud(other, () => readMuseNote(other, 'soul')), otherBefore);
+  assert.equal((await cloud(other, () => ensureMuse(other))).name, 'Muse');
+  const reset = await cloud(owner, () => readMuseCanvas(owner));
+  reset.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Muse.';
+  await cloud(owner, () => saveMuseCanvas(owner, reset));
+  assert.equal((await cloud(owner, () => ensureMuse(owner))).name, 'Muse');
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, soulBefore.content, 'resetting the name must not trigger legacy repair with the previous name');
+});
+
+test('a soul edit between rename validation and cloud commit rolls back the name and all staged files', async () => {
+  const owner = 'user_cloud_rename_race';
+  await cloud(owner, async () => saveMuseCanvas(owner, await readMuseCanvas(owner)));
+  const snapshot = await cloud(owner, () => readMuseCanvas(owner));
+  const identity = await cloud(owner, () => ensureMuse(owner));
+  const originalCanvas = await cloud(owner, () => readFile(join(museDirectory(owner), 'canvas.json'), 'utf8'));
+  const originalMemory = await cloud(owner, () => readMuseNote(owner, 'memory'));
+  snapshot.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Kumo.';
+  snapshot.board.pages[0].objects.find(object => object.id === 'muse-file-memory').markdown = 'This stale edit must not commit.';
+  const connection = client(owner), original = connection.rpc;
+  let injected = false;
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files' && args.changes.some(change => change.name === 'canvas.json' && Object.hasOwn(change, 'content'))) {
+      assert.equal(injected, false, 'a stale rename must not rerun after the conflict');
+      injected = true;
+      await asUser(owner, tx => tx.query("update public.muse_private_files set content=$1,version=gen_random_uuid() where owner_id=$2 and name='soul.md'", [Buffer.from('Newer external soul edit').toString('base64'), owner]));
+    }
+    return original(name, args);
+  };
+  await assert.rejects(withMuseStorage(owner, connection, () => saveMuseCanvas(owner, snapshot)), { status: 409, code: 'PT409' });
+  assert.equal(injected, true);
+  assert.deepEqual(await cloud(owner, () => ensureMuse(owner)), identity);
+  assert.equal(await cloud(owner, () => readFile(join(museDirectory(owner), 'canvas.json'), 'utf8')), originalCanvas);
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'memory'))).content, originalMemory.content);
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, 'Newer external soul edit');
+});
+
+test('opening a legacy cloud notebook repairs its default identity once and preserves custom souls', async () => {
+  const owner = 'user_cloud_legacy_name';
+  const snapshot = await cloud(owner, () => readMuseCanvas(owner));
+  snapshot.board.museName = 'Kumo';
+  snapshot.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Kumo.';
+  const original = snapshot.board.pages[0].objects.find(object => object.id === 'muse-file-soul').markdown + '\n## Personal style\nMy reference to Muse stays unchanged.\n';
+  await cloud(owner, () => withStorageTransaction(async () => {
+    await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
+    await writeFile(join(museDirectory(owner), 'soul.md'), original);
+  }));
+  const version = async () => (await asUser(owner, tx => tx.query("select version from public.muse_private_files where owner_id=$1 and name='soul.md'", [owner]))).rows[0].version;
+  const before = await version();
+  const reloaded = await cloud(owner, () => readMuseCanvas(owner));
+  const expected = original.replace('I’m Muse, your companion inside Muze.', 'I’m Kumo, your companion inside Muze.');
+  assert.equal(reloaded.board.pages[0].objects.find(object => object.id === 'muse-file-soul').markdown, expected);
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, expected);
+  const repaired = await version();
+  assert.notEqual(repaired, before);
+  await cloud(owner, () => readMuseCanvas(owner));
+  assert.equal(await version(), repaired, 'reopening should not create another database version');
+  const custom = '# My custom soul\nI’m Muse, your companion inside Muze.\nPreserve my words.';
+  await cloud(owner, () => writeFile(join(museDirectory(owner), 'soul.md'), custom));
+  const customVersion = await version();
+  await cloud(owner, () => readMuseCanvas(owner));
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, custom);
+  assert.equal(await version(), customVersion);
+});
+
 test('RLS rejects ownership reassignment and anonymous access, including direct API writes', async () => {
   await assert.rejects(asUser('user_bob', tx => tx.query("update public.muse_private_files set owner_id='user_alice' where name='memory.md'")), { code: '42501' });
   await assert.rejects(asUser('user_bob', tx => tx.query("insert into public.muse_private_files(owner_id,name,content) values ('user_alice','icon.png','')")), { code: '42501' });

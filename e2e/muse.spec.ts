@@ -369,8 +369,39 @@ test('canvas name edits confirm on blur, preserve identity on revert, and persis
  await input.fill('');await page.mouse.click(700,650);const dialog=page.getByRole('dialog',{name:'Confirm Muse name'});await dialog.getByRole('button',{name:'Rename',exact:true}).click();await expect(page.getByRole('alert')).toContainText('1–40');await dialog.getByRole('button',{name:'Revert',exact:true}).click();await select();await expect(input).toHaveValue('Muse');await input.fill('Never saved');await page.getByRole('button',{name:'Back to whiteboard',exact:true}).click();await expect(dialog).toBeVisible();await expect(page.getByRole('button',{name:'Back to whiteboard'})).toBeVisible();await page.keyboard.press('Escape');await select();await expect(input).toHaveValue('Muse');await input.fill('小月');await page.keyboard.press('Enter');await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Rename',exact:true}).click();await expect.poll(()=>fixture.canvases.get('owner-a')?.board.museName).toBe('小月');await page.getByRole('button',{name:'Back to whiteboard',exact:true}).click();await expect(page.locator('.muse-floating-name')).toHaveText('小月');await page.reload();await expect(page.locator('.muse-floating-name')).toHaveText('小月');await openMuseEditor(page);await expect(page.locator('.muse-appearance-label')).toContainText('小月');await page.screenshot({path:'verification/muse-name-canvas.png'});
 });
 
-test('tasks run automatically and reload; imported images retain provenance',async({page})=>{
- await museFixture(page);await chat(page);await page.getByRole('textbox',{name:'Message Muse'}).fill('Plan a small garden');await page.getByText('Work through a task',{exact:true}).click();await page.getByRole('button',{name:'Run task from message'}).click();await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');await page.reload();await chat(page);await page.getByText('Work through a task',{exact:true}).click();await expect(page.locator('.muse-task-panel')).toContainText('Plan a small garden');await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');await page.getByText('Add an image from a link',{exact:true}).click();await page.getByRole('textbox',{name:'Image URL'}).fill('https://example.org/photo.png');await page.locator('.muse-task-panel').getByRole('button',{name:'Add image',exact:true}).click();await expect(page.locator('.muse-image-source')).toHaveAttribute('href','https://example.org/photo.png');await page.reload();await expect(page.locator('.muse-image-source')).toHaveAttribute('href','https://example.org/photo.png');
+test('renaming Muse updates the canonical soul identity and undoes both together',async({page})=>{
+ const original='# Soul\n\nMy name is Muse. I help make ideas clear.\n\n- Keep answers short.\n- My owner has a friend named Muse.';
+ const fixture=await museFixture(page,{soul:original});
+ await openMuseEditor(page);
+ const memory=fixture.notes.get('owner-a:memory')!.content;
+ const label=page.locator('.muze-vector-surface [id="muse-name"]'),soul=page.locator('.muze-vector-surface [id="muse-file-soul"]');
+ const rename=async(name:string)=>{
+   await expect(label).toBeVisible();const box=(await label.boundingBox())!;
+   await page.mouse.click(box.x+80,box.y+box.height/2);
+   await page.getByRole('textbox',{name:'Muse name',exact:true}).fill(name);await page.keyboard.press('Enter');
+   await page.getByRole('dialog',{name:'Confirm Muse name'}).getByRole('button',{name:'Rename',exact:true}).click();
+   await expect.poll(()=>fixture.canvases.get('owner-a')?.board.museName).toBe(name);
+ };
+ const expected=(name:string)=>original.replace('My name is Muse.','My name is '+name+'.');
+ await rename('Kumo');await expect(soul).toContainText('My name is Kumo.');
+ expect(fixture.notes.get('owner-a:soul')!.content).toBe(expected('Kumo'));
+ await rename('Luna');await expect(soul).toContainText('My name is Luna.');
+ expect(fixture.notes.get('owner-a:soul')!.content).toBe(expected('Luna'));
+ const renamed=(await exported(page)).objects.find(object=>object.id==='muse-file-soul')!;
+ expect(renamed.markdown).toBe(expected('Luna'));expect(renamed.text).toContain('My name is Luna.');
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ await expect(label).toContainText('Hello, my name is Kumo.');await expect(soul).toContainText('My name is Kumo.');
+ await expect.poll(()=>fixture.notes.get('owner-a:soul')?.content).toBe(expected('Kumo'));
+ await page.getByRole('button',{name:'Redo',exact:true}).click();await expect(soul).toContainText('My name is Luna.');
+ await expect.poll(()=>fixture.notes.get('owner-a:soul')?.content).toBe(expected('Luna'));
+ expect(fixture.notes.get('owner-a:memory')!.content).toBe(memory);
+ await page.reload();await openMuseEditor(page);await expect(soul).toContainText('My name is Luna.');
+ const box=(await soul.boundingBox())!;await page.mouse.dblclick(box.x+70,box.y+110);
+ const input=page.locator('textarea[data-fabric="textarea"]');await expect(input).toHaveValue(expected('Luna'));await input.press('Escape');
+});
+
+test('tasks run automatically and reload',async({page})=>{
+ await museFixture(page);await chat(page);await page.getByRole('textbox',{name:'Message Muse'}).fill('Plan a small garden');await page.getByText('Work through a task',{exact:true}).click();await page.getByRole('button',{name:'Run task from message'}).click();await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');await page.reload();await chat(page);await page.getByText('Work through a task',{exact:true}).click();await expect(page.locator('.muse-task-panel')).toContainText('Plan a small garden');await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
 });
 
 test('automatic replacement preserves current avatar while pending, cancels cleanly and never silently retries',async({page})=>{

@@ -26,7 +26,7 @@ function fixtureBundle() {
 }
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
-export async function museFixture(page: Page) {
+export async function museFixture(page: Page, initialNotes:Partial<Record<'soul'|'memory',string>>={}) {
   const assets = await fixtureBundle();
   const defaultAvatar='data:image/png;base64,'+(await readFile('public/muse/default-avatar.png')).toString('base64');
   let owner = 'owner-a', turn = 0, icon: string | null = null;
@@ -35,6 +35,7 @@ export async function museFixture(page: Page) {
   let beforeCanvasSave=async()=>{};
   const canvases = new Map<string, {board:any;revision:string;notes:Record<string,string>}>();
   const notes = new Map<string, { content: string; revision: string; updatedAt: number }>();
+  for(const [key,content] of Object.entries(initialNotes))notes.set('owner-a:'+key,{content,revision:'initial',updatedAt:Date.now()});
   const history = new Map<string, Message[]>();
   let respond: (body: { message: string; board: string }) => Promise<MuseActions> = async () => ({ cards: [
     { id: 'muse-test-0', title: 'Set the direction', body: 'Choose a goal and define what success looks like.\n• Name the outcome\n• Set a useful deadline' },
@@ -54,7 +55,7 @@ export async function museFixture(page: Page) {
           const id=owner+':'+key;if(!notes.has(id))notes.set(id,{content:'# '+key+'\n\nA few things about me.',revision:'initial',updatedAt:Date.now()});
           return {type:'MuzeDocument',id:'muse-file-'+key,markdown:notes.get(id)!.content,documentTitle:key+'.md',text:notes.get(id)!.content,left:220+i*530,top:190+i*80,width:430,boxHeight:360,inset:28,angle:i?2:-2,fontFamily:'IBM Plex Sans',fontSize:20,fill:'#202124',backgroundColor:'#ffffff',strokeWidth:0,verticalAlign:'top'};
         });
-        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'MuzeText',id:'muse-name',styles:museNameStyles('Muse'),text:'Hello, my name is Muse.',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false},{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muze',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay in your private notebook—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
+        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'MuzeText',id:'muse-name',styles:museNameStyles('Muse'),text:'Hello, my name is Muse.',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false},{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muze',text:'Your private Muse notebook. Your notes, comments, and captions help Muse understand you.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
       }
       const current=canvases.get(owner)!;
       if(req.method()==='PUT') {

@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { museRequest } from './shared';
 import type { Board } from '../muze/storage';
-type Snapshot = { name?:string; ownerId?:string; board:Board; revision:string; notes:{soul:string;memory:string} };
+import { reconcileMuseNameSave } from '@/lib/muse-name';
+type Snapshot = { name?:string; soul?:string; ownerId?:string; board:Board; revision:string; notes:{soul:string;memory:string} };
 export function useMuseCanvas(owner?:string) {
   const [board,setBoard]=useState<Board|null>(null),[status,setStatus]=useState(''),[error,setError]=useState('');
   const currentBoard=useRef<Board|null>(null);
@@ -14,7 +15,14 @@ export function useMuseCanvas(owner?:string) {
     const work=async()=>{
       while(pending.current && snapshot.current && epoch===generation.current) {
         const next=pending.current;pending.current=null;setStatus('Saving…');setError('');
-        try {const result=await museRequest<Omit<Snapshot,'board'>>('canvas',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...snapshot.current,board:next})});if(epoch!==generation.current)return;snapshot.current={board:next,ownerId:snapshot.current.ownerId,...result};if(result.name){const named={...next,museName:result.name};currentBoard.current=named;setBoard(named);}if(result.name)window.dispatchEvent(new CustomEvent('muse-name-saved',{detail:{name:result.name,ownerId:snapshot.current.ownerId}}));}
+        try {
+          const result=await museRequest<Omit<Snapshot,'board'>>('canvas',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...snapshot.current,board:next})});
+          if(epoch!==generation.current)return;
+          snapshot.current={board:reconcileMuseNameSave(next,next,result),ownerId:snapshot.current.ownerId,...result};
+          const latest=currentBoard.current;
+          if(latest){const reconciled=reconcileMuseNameSave(latest,next,result);currentBoard.current=reconciled;setBoard(reconciled);if(pending.current===latest)pending.current=reconciled;}
+          if(result.name)window.dispatchEvent(new CustomEvent('muse-name-saved',{detail:{name:result.name,ownerId:snapshot.current.ownerId}}));
+        }
         catch(e) {if(epoch===generation.current){pending.current ||= next;setStatus('Not saved');setError((e as Error).message);}throw e;}
       }
       if(epoch===generation.current)setStatus('Saved');

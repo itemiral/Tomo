@@ -1,4 +1,4 @@
-import {museNameStyles} from '@/lib/muse-name';
+import {museNameStyles,nameFromText,renameMuseInSoul} from '@/lib/muse-name';
 import { ActiveSelection, Canvas, Ellipse, FabricImage, FabricObject, Group, IText, Line, PencilBrush, Point, Polygon, Rect, Textbox, Triangle, util, type TPointerEvent, type TMat2D } from 'fabric';
 import { MuzeArrow, MuzeDocument, MuzeNote, MuzeText, MuzeLabel, type Arrowhead } from './objects';
 import { MuzeShape, type Geo } from './shapes';
@@ -641,7 +641,17 @@ export class WhiteboardEngine {
     this.disposers.push(() => { element.removeEventListener('pointerdown', down, true); window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); });
   }
   museNameSelected(){return this.canvas.getActiveObjects().length===1&&this.canvas.getActiveObject()?.id==='muse-name';}
-  renameMuse(name:string){const object=this.canvas.getObjects().find(o=>o.id==='muse-name');if(object instanceof IText){object.set({text:'Hello, my name is '+name+'.',styles:museNameStyles(name)});object.initDimensions();object.setCoords();this.canvas.discardActiveObject();this.checkpoint();}}
+  renameMuse(name:string){
+    const visit=(objects:FabricObject[]):FabricObject[]=>objects.flatMap(object=>object instanceof Group?[object,...visit(object.getObjects())]:[object]);
+    const objects=visit(this.canvas.getObjects()),object=objects.find(item=>item.id==='muse-name');
+    if(!(object instanceof IText))return;
+    const previousName=nameFromText(object.text);
+    object.set({text:'Hello, my name is '+name+'.',styles:museNameStyles(name)});object.initDimensions();object.setCoords();
+    for(const document of objects)if(document.id==='muse-file-soul'&&document instanceof MuzeDocument){
+      document.markdown=renameMuseInSoul(document.markdown??'',previousName,name);document.present();
+    }
+    this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.checkpoint();
+  }
   clearSelection(){this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.emit();}
   async addRemoteImage(item:NonNullable<MuseActions['images']>[number]) {
     if(!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(item.src)||item.src.length>16000000)return;
@@ -651,18 +661,22 @@ export class WhiteboardEngine {
       image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(b=>b.left+b.width))+48:center.x,top:center.y-160,...{sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt,imageUrl:item.imageUrl,attribution:item.attribution}});image.scale(Math.min(1,420/image.width,320/image.height));canvas.add(image);this.setTool('select');canvas.setActiveObject(image);this.checkpoint();this.fit(true);
     }catch{this.report('The image could not be placed.');}
   }
-  async addImage(file: File) {
+  async addImage(file: File, canApply:()=>boolean=()=>true) {
+    const version=this.loadVersion;
+    const current=()=>!this.closed&&!this.loading&&this.enabled&&this.loadVersion===version&&canApply();
+    if(!current())return false;
     try {
       if (file.size > 20_000_000 || !file.type.startsWith('image/')) throw new Error('Choose an image smaller than 20 MB.');
       const url = URL.createObjectURL(file);
       let image: FabricImage;
       try { image = await FabricImage.fromURL(url); } finally { URL.revokeObjectURL(url); }
+      if(!current())return false;
       const src = image.toDataURL({ format: 'png', multiplier: 1 });
       const portable = await FabricImage.fromURL(src); const center = this.center();
-      if (this.closed) return;
+      if (!current()) return false;
       portable.set({ id: crypto.randomUUID(), left: center.x - Math.min(portable.width, 480) / 2, top: center.y - Math.min(portable.height, 320) / 2 }); portable.scale(Math.min(1, 480 / portable.width, 360 / portable.height));
       this.canvas.add(portable); this.setTool('select'); this.canvas.setActiveObject(portable); this.checkpoint(); return true;
-    } catch (error) { this.report(error instanceof Error ? error.message : 'Could not open that image.'); return false; }
+    } catch (error) { if(current())this.report(error instanceof Error ? error.message : 'Could not open that image.'); return false; }
   }
   async export(format: 'png' | 'svg', title: string) {
     const fonts = format === 'svg' ? await svgFonts() : '';

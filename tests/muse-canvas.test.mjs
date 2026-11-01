@@ -1,12 +1,12 @@
 import { test,after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,rm,readFile } from 'node:fs/promises';
+import { mkdtemp,rm,readFile,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { documentText } from '../src/components/muze/document-text.ts';
 const directory=await mkdtemp(join(tmpdir(),'muse-canvas-test-'));process.env.MUZE_PRIVATE_DIR=directory;
-const {readMuseCanvas,saveMuseCanvas,describeMuseCanvas}=await import('../scripts/muse-canvas.mjs');
-const {readMuseNote,saveMuseNote,museDirectory}=await import('../scripts/muse-store.mjs');
+const {readMuseCanvas,saveMuseCanvas,describeMuseCanvas,MUSE_COMMENT}=await import('../scripts/muse-canvas.mjs');
+const {readMuseNote,saveMuseNote,museDirectory,ensureMuse}=await import('../scripts/muse-store.mjs');
 after(()=>rm(directory,{recursive:true,force:true}));
 test('Fabric notebook documents write canonical files and preserve canvas drawing data across reload',async()=>{
  const snapshot=await readMuseCanvas('owner');const board=snapshot.board;
@@ -36,4 +36,115 @@ test('document presentation preserves source separately and does not fetch image
 });
 test('Muse rename is canonical, scoped, unicode-safe and rejects invalid edits without losing the saved name',async()=>{
  const {ensureMuse}=await import('../scripts/muse-store.mjs');let snapshot=await readMuseCanvas('named');let name=snapshot.board.pages[0].objects.find(o=>o.id==='muse-name');assert.equal(name.text,'Hello, my name is Muse.');name.text='Hello, my name is 小月 🐾.';await saveMuseCanvas('named',snapshot);assert.equal((await ensureMuse('named')).name,'小月 🐾');assert.equal((await ensureMuse('another-name')).name,'Muse');snapshot=await readMuseCanvas('named');assert.equal(snapshot.board.pages[0].objects.find(o=>o.id==='muse-name').text,'Hello, my name is 小月 🐾.');snapshot.board.pages[0].objects.find(o=>o.id==='muse-name').text='Hello, my name is <script>.';await assert.rejects(saveMuseCanvas('named',snapshot),/markup/);assert.equal((await ensureMuse('named')).name,'小月 🐾');snapshot.board.pages[0].objects.find(o=>o.id==='muse-name').text='Hello, my name is    .';await assert.rejects(saveMuseCanvas('named',snapshot),/1–40/);
+});
+
+const card = (snapshot, id) => snapshot.board.pages.flatMap(page => page.objects).find(object => object.id === id);
+const renameDraft = (snapshot, name) => { card(snapshot, 'muse-name').text = 'Hello, my name is ' + name + '.'; return snapshot; };
+
+test('renaming Muse updates the canonical introduction through successive names while preserving custom notes', async () => {
+ const owner = 'rename-soul';
+ let snapshot = await readMuseCanvas(owner);
+ const initialSoul = card(snapshot, 'muse-file-soul').markdown;
+ const customBody = '\n## My preferences\nUse short paragraphs. Muse is also a product I use.\n';
+ const memory = '# Memory\nKeep the names Muse and Kumo in this meeting record.\n';
+ card(snapshot, 'muse-file-soul').markdown = initialSoul + customBody;
+ card(snapshot, 'muse-file-memory').markdown = memory;
+ await saveMuseCanvas(owner, snapshot);
+ const identity = await ensureMuse(owner);
+ for (const name of ['Kumo', 'Nova', 'Muse']) {
+  snapshot = renameDraft(await readMuseCanvas(owner), name);
+  const saved = await saveMuseCanvas(owner, snapshot);
+  const expected = initialSoul.replace('I’m Muse,', 'I’m ' + name + ',') + customBody;
+  assert.equal((await readMuseNote(owner, 'soul')).content, expected);
+  assert.equal((await readMuseNote(owner, 'memory')).content, memory);
+  const reloaded = await readMuseCanvas(owner);
+  assert.equal(reloaded.board.museName, name);
+  assert.equal(card(reloaded, 'muse-file-soul').markdown, expected);
+  assert.equal(card(reloaded, 'muse-file-soul').text, expected);
+  const serialized = JSON.parse(await readFile(join(museDirectory(owner), 'canvas.json'), 'utf8'));
+  assert.equal(serialized.pages[0].objects.find(object => object.id === 'muse-file-soul').markdown, expected);
+  assert.equal(reloaded.notes.soul, saved.notes.soul);
+  assert.deepEqual(await ensureMuse(owner), { ...identity, name });
+ }
+ assert.equal((await readMuseNote('rename-other-owner', 'soul')).content, initialSoul);
+});
+
+test('custom soul text gets a single name declaration on rename and stays untouched on same-name saves', async () => {
+ const owner = 'rename-custom-soul', custom = 'Keep answers short.\nMuse and Kumo are names in a historical example.\n';
+ let snapshot = await readMuseCanvas(owner);
+ card(snapshot, 'muse-file-soul').markdown = custom;
+ await saveMuseCanvas(owner, snapshot);
+ assert.equal((await readMuseNote(owner, 'soul')).content, custom, 'saving an unchanged name must not add an introduction');
+ await saveMuseCanvas(owner, renameDraft(await readMuseCanvas(owner), 'Kumo'));
+ const first = (await readMuseNote(owner, 'soul')).content;
+ assert.ok(first.includes(custom));
+ assert.match(first.replace(custom, ''), /Kumo/);
+ assert.ok(first.length - custom.length < 100, 'the added identity declaration should stay minimal');
+ await saveMuseCanvas(owner, await readMuseCanvas(owner));
+ assert.equal((await readMuseNote(owner, 'soul')).content, first);
+ await saveMuseCanvas(owner, renameDraft(await readMuseCanvas(owner), 'Nova'));
+ const next = (await readMuseNote(owner, 'soul')).content;
+ assert.equal(next, first.replace('Kumo', 'Nova'));
+ assert.ok(next.includes(custom), 'historical name references must not be rewritten');
+});
+
+test('an external soul edit rejects the entire stale rename without changing the name or memory', async () => {
+ const owner = 'rename-soul-conflict';
+ await saveMuseCanvas(owner, await readMuseCanvas(owner));
+ const snapshot = renameDraft(await readMuseCanvas(owner), 'Kumo');
+ const identity = await ensureMuse(owner), memory = await readMuseNote(owner, 'memory');
+ const originalCanvas = await readFile(join(museDirectory(owner), 'canvas.json'), 'utf8');
+ card(snapshot, 'muse-file-memory').markdown = 'This stale edit must not save.';
+ const soul = await readMuseNote(owner, 'soul');
+ await saveMuseNote(owner, 'soul', '# Soul\nAn external edit that must survive.', soul.revision);
+ await assert.rejects(saveMuseCanvas(owner, snapshot), { status: 409 });
+ assert.deepEqual(await ensureMuse(owner), identity);
+ assert.equal((await readMuseNote(owner, 'soul')).content, '# Soul\nAn external edit that must survive.');
+ assert.equal((await readMuseNote(owner, 'memory')).content, memory.content);
+ assert.equal(await readFile(join(museDirectory(owner), 'canvas.json'), 'utf8'), originalCanvas);
+});
+
+test('saved default welcome comments adopt current copy while custom welcome comments remain unchanged', async () => {
+ const owner = 'welcome-copy', snapshot = await readMuseCanvas(owner);
+ const welcome = snapshot.board.comments.find(comment => comment.id === 'muse-welcome');
+ assert.ok(welcome);
+ const prefix = 'A little notebook for your Muse. Your words, comments and drawings become context. ';
+ for (const message of [
+  prefix + 'Pictures stay local—add a caption for what Muse should know.',
+  prefix + 'Pictures stay in your private notebook—add a caption for what Muse should know.',
+ ]) {
+  welcome.text = message;
+  await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
+  const reloaded = await readMuseCanvas(owner);
+  assert.equal(reloaded.board.comments.find(comment => comment.id === 'muse-welcome').text, MUSE_COMMENT);
+ }
+ assert.equal(MUSE_COMMENT, 'Your private Muse notebook. Your notes, comments, and captions help Muse understand you.');
+ welcome.text = 'My own welcome and planning reminders.';
+ await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
+ assert.equal((await readMuseCanvas(owner)).board.comments.find(comment => comment.id === 'muse-welcome').text, welcome.text);
+});
+
+test('reopening an older renamed notebook repairs only its exact default soul introduction once', async () => {
+ const owner = 'legacy-renamed-soul', snapshot = renameDraft(await readMuseCanvas(owner), 'Kumo');
+ snapshot.board.museName = 'Kumo';
+ const original = card(snapshot, 'muse-file-soul').markdown + '\n## Custom detail\nKeep this body and the word Muse unchanged.\n';
+ const path = join(museDirectory(owner), 'soul.md');
+ await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
+ await writeFile(path, original);
+ const reloaded = await readMuseCanvas(owner);
+ const expected = original.replace('I’m Muse, your companion inside Muze.', 'I’m Kumo, your companion inside Muze.');
+ assert.equal(card(reloaded, 'muse-file-soul').markdown, expected);
+ assert.equal(await readFile(path, 'utf8'), expected);
+ const note = await readMuseNote(owner, 'soul');
+ assert.equal((await ensureMuse(owner)).name, 'Kumo');
+ await readMuseCanvas(owner);
+ assert.deepEqual(await readMuseNote(owner, 'soul'), note, 'reopening must not rewrite the already-repaired note');
+ for (const custom of [
+  '# My soul\n\nI’m Muse, your companion inside Muze.\nA custom introduction.',
+  '# Soul\n\n## Who I am\nI’m Muse, your research partner.\nA custom role.',
+ ]) {
+  await writeFile(path, custom);
+  await readMuseCanvas(owner);
+  assert.equal(await readFile(path, 'utf8'), custom);
+ }
 });

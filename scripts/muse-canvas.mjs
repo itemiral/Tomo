@@ -1,4 +1,4 @@
-import {NAME_PREFIX,nameFromText,museNameStyles} from '../src/lib/muse-name.ts';
+import {NAME_PREFIX,nameFromText,museNameStyles,renameMuseInSoul} from '../src/lib/muse-name.ts';
 import { readFile, writeFile, rename } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -8,7 +8,11 @@ import { digest } from './muse-local.mjs';
 import { documentColor } from '../src/components/muze/document-color.ts';
 import { parseBoardFile } from '../src/components/muze/storage.ts';
 
-export const MUSE_COMMENT = 'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay in your private notebook—add a caption for what Muse should know.';
+export const MUSE_COMMENT = 'Your private Muse notebook. Your notes, comments, and captions help Muse understand you.';
+const previousWelcomeMessages=new Set([
+  'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.',
+  'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay in your private notebook—add a caption for what Muse should know.',
+]);
 const noteIds = { soul: 'muse-file-soul', memory: 'muse-file-memory' };
 export function walkObjects(objects, visit) { for (const o of objects) { visit(o); if (Array.isArray(o.objects)) walkObjects(o.objects, visit); } }
 function fileCard(key, text, x, y, angle) {
@@ -22,9 +26,16 @@ async function initialBoard(owner, notes) {
 }
 async function raw(owner) { try { return await readFile(join(museDirectory(owner),'canvas.json'),'utf8'); } catch(e) { if(e.code==='ENOENT') return null; throw e; } }
 export async function readMuseCanvas(owner) {
+ return withMuseOwner(owner,async()=>{
   const identity=await ensureMuse(owner);
   const notes = {soul:await readMuseNote(owner,'soul'),memory:await readMuseNote(owner,'memory')};
+  const legacyIntroduction='# Soul\n\n## Who I am\nI’m Muse, your companion inside Muze.';
+  if(identity.name!=='Muse'&&notes.soul.content.startsWith(legacyIntroduction)){
+    const content=notes.soul.content.replace(legacyIntroduction,()=>`# Soul\n\n## Who I am\nI’m ${identity.name}, your companion inside Muze.`);
+    notes.soul=await saveMuseNoteUnlocked(owner,'soul',content,notes.soul.revision);
+  }
   const text = await raw(owner), board = text ? JSON.parse(text) : await initialBoard(owner,notes);
+  for(const comment of board.comments||[])if(comment.id==='muse-welcome'&&previousWelcomeMessages.has(comment.text))comment.text=MUSE_COMMENT;
   let nameObject;for(const page of board.pages)walkObjects(page.objects,o=>{if(o.id==='muse-name')nameObject=o;});
   if(!nameObject){nameObject={type:'MuzeText',id:'muse-name',muzeKind:'muse-name',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false,autoWidth:true,text:NAME_PREFIX+identity.name+'.'};board.pages[0].objects.push(nameObject);}
   nameObject.editable=false;nameObject.styles=museNameStyles(identity.name);nameObject.fontSize=40;nameObject.width=Math.max(950,nameObject.width||0);board.museName=identity.name;
@@ -37,6 +48,7 @@ export async function readMuseCanvas(owner) {
   // File content is canonical, even when edited outside the canvas.
   for(const page of board.pages) walkObjects(page.objects,o=>{for(const key of ['soul','memory']) if(o.id===noteIds[key]) {o.text=notes[key].content;o.markdown=notes[key].content;o.type='MuzeDocument';o.documentTitle=key+'.md';}});
   return {board,revision:digest(text || ''),notes:{soul:notes.soul.revision,memory:notes.memory.revision},context:describeMuseCanvas(board)};
+ });
 }
 export function describeMuseCanvas(board) {
   const pages = board.pages.map(page=>{
@@ -74,19 +86,24 @@ export async function saveMuseCanvas(owner,body) {
   if(appearances!==1) throw new MuseStoreError(400,'Keep one Muse appearance image on this board. Undo its removal or duplication, then use Swap image to change it.');
   if(!found.soul || !found.memory) throw new MuseStoreError(400,'Keep the soul.md and memory.md cards in your notebook. Undo their removal to save.');
   if(count>1000 || describeMuseCanvas(board).length>64000) throw new MuseStoreError(413,'This notebook has more context than Muse can use. Shorten some text or remove a few objects; your draft stays open.');
-  const content=JSON.stringify(board);
-  if(Buffer.byteLength(content)>20_000_000) throw new MuseStoreError(413,'This notebook is over 20 MB. Use smaller local images.');
   return withMuseOwner(owner,async()=>{
-    if(digest((await raw(owner))||'')!==body.revision) throw new MuseStoreError(409,'This notebook changed elsewhere. Your draft is preserved; reload the saved notebook or export your draft.');
+    const previous=await raw(owner);
+    if(digest(previous||'')!==body.revision) throw new MuseStoreError(409,'This notebook changed elsewhere. Your draft is preserved; reload the saved notebook or export your draft.');
     const notes={soul:await readMuseNote(owner,'soul'),memory:await readMuseNote(owner,'memory')};
     for(const key of ['soul','memory']) {
       if(notes[key].revision!==body.notes[key]) throw new MuseStoreError(409,key+'.md changed elsewhere. Your draft is preserved; reload before saving.');
       if(typeof (found[key].markdown ?? found[key].text)!=='string' || Buffer.byteLength((found[key].markdown ?? found[key].text))>512000 || (found[key].markdown ?? found[key].text).includes('\0')) throw new MuseStoreError(400,'Keep Muse files under 500 KB of text.');
     }
+    const previousName=previous?JSON.parse(previous).museName||'Muse':'Muse';
+    const soul=renameMuseInSoul(found.soul.markdown??found.soul.text,previousName,board.museName);
+    if(Buffer.byteLength(soul)>512000)throw new MuseStoreError(400,'Keep Muse files under 500 KB of text.');
+    found.soul.markdown=soul;found.soul.text=soul;
+    const content=JSON.stringify(board);
+    if(Buffer.byteLength(content)>20_000_000) throw new MuseStoreError(413,'This notebook is over 20 MB. Use smaller local images.');
     for(const key of ['soul','memory']) if(notes[key].content!==(found[key].markdown ?? found[key].text)) notes[key]=await saveMuseNoteUnlocked(owner,key,(found[key].markdown ?? found[key].text),notes[key].revision);
     const path=join(museDirectory(owner),'canvas.json'), temp=path+'.'+randomUUID();
     await writeFile(temp,content,{flag:'wx',mode:0o600});await rename(temp,path);
-    return {name:board.museName,revision:digest(content),notes:{soul:notes.soul.revision,memory:notes.memory.revision}};
+    return {name:board.museName,soul,revision:digest(content),notes:{soul:notes.soul.revision,memory:notes.memory.revision}};
   });
 }
 export async function museCanvasContext(owner) { return describeMuseCanvas((await readMuseCanvas(owner)).board); }
