@@ -1,61 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { UserButton, useUser } from '@clerk/nextjs';
+import { UserButton, useClerk, useUser } from '@clerk/nextjs';
 import { ArrowLeft, BookOpen, Check, Cloud, FileText, Heart, LockKeyhole, Maximize2, Pencil, RefreshCw, SquarePen, X } from 'lucide-react';
 import { MuseIcon, MuseMarkdown, museRequest as request, RequestError, type MuseProfile } from './shared';
 import { MuseChat } from './chat';
+import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import './muse.css';
 
 type NoteKey = 'soul' | 'memory';
 type Note = { key: NoteKey; content: string; revision: string; updatedAt: number };
 type Draft = { content: string; revision: string };
-type Position = { x: number; y: number };
-export type Obstacle = Position & { id?: string; w: number; h: number };
-type Activity = { label: string; targetId?: string };
+type Activity = MuseActivity;
 type Props = { open: boolean; onOpenChange: (open: boolean) => void; obstacles: Obstacle[]; thread: string; boardContext: string; addToBoard: (text: string) => void; applyActions: (actions: MuseActions) => MuseApplyResult };
 const noteNames = { soul: 'Soul.md', memory: 'Memory.md' };
-function FloatingMuse({ profile, open, obstacles, activity }: { profile: MuseProfile; open: () => void; obstacles: Obstacle[]; activity: Activity }) {
-  const [position, setPosition] = useState<Position>(() => ({ x: 24, y: Math.max(110, innerHeight - 240) }));
-  const [dragging, setDragging] = useState(false);
-  const latest = useRef(obstacles); latest.current = obstacles;
-  const working = useRef(activity); working.current = activity;
-  const point = useRef(position); point.current = position;
-  const drag = useRef<{ start: Position; from: Position; moved: boolean } | null>(null);
-  const moved = useRef(false);
-  const clamp = (p: Position) => ({ x: Math.max(12, Math.min(innerWidth - 104, p.x)), y: Math.max(104, Math.min(innerHeight - 222, p.y)) });
-  const settle = useCallback((park = false) => {
-    if (drag.current) return;
-    const ui = [...document.querySelectorAll('.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat,.muze-toolbar-dock,.muse-tabs')].filter(el => el.getBoundingClientRect().width).map(el => { const b = el.getBoundingClientRect(); return { x: b.x - 12, y: b.y - 12, w: b.width + 24, h: b.height + 24 }; });
-    const boxes = [...latest.current, ...ui];
-    const target = working.current.label ? latest.current.find(box => box.id === working.current.targetId) || latest.current.find(box => box.x > 100 && box.x < innerWidth - 100 && box.y > 80 && box.y < innerHeight - 100) : undefined;
-    const home = { x: 24, y: innerHeight - 240 };
-    const preferred = target ? clamp({ x: target.x - 112, y: target.y + 24 }) : working.current.label ? clamp({ x: innerWidth * .55, y: innerHeight * .4 }) : park ? clamp(home) : clamp(point.current);
-    const score = (p: Position) => boxes.reduce((sum, box) => sum + Math.max(0, Math.min(p.x + 92, box.x + box.w + 14) - Math.max(p.x, box.x - 14)) * Math.max(0, Math.min(p.y + 146, box.y + box.h + 14) - Math.max(p.y, box.y - 14)), 0) * 1000 + Math.hypot(p.x - preferred.x, p.y - preferred.y);
-    const nearby = target ? [{ x: target.x - 112, y: target.y + 24 }, { x: target.x + target.w + 16, y: target.y + 24 }, { x: target.x, y: target.y - 165 }, { x: target.x, y: target.y + target.h + 16 }].map(clamp) : [];
-    const candidates = [preferred, ...nearby, ...[24, innerWidth - 120, innerWidth - 270].flatMap(x => [innerHeight - 240, innerHeight * .5, 120].map(y => clamp({ x, y })))];
-    candidates.sort((a, b) => score(a) - score(b));
-    setPosition(candidates[0]);
-  }, []);
-  useEffect(() => { const timer = setTimeout(settle, 650); return () => clearTimeout(timer); }, [obstacles, settle]);
-  useEffect(() => { settle(!activity.label); }, [activity.label, activity.targetId, settle]);
-  useEffect(() => { const resized = () => settle(); window.addEventListener('resize', resized); return () => window.removeEventListener('resize', resized); }, [settle]);
-  function finish(event: React.PointerEvent<HTMLButtonElement>, cancelled = false) {
-    if (!drag.current) return;
-    moved.current = drag.current.moved || cancelled; drag.current = null; setDragging(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    settle();
-  }
-  return <button type="button" className={'muse-floating' + (dragging ? ' dragging' : '') + (activity.label ? ' working' : '')} style={{ left: position.x, top: position.y }} aria-label="Talk to Muse" title="Muse — drag to move; click to talk"
-    onPointerDown={event => { if (event.button !== 0) return; event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); moved.current = false; drag.current = { start: { x: event.clientX, y: event.clientY }, from: point.current, moved: false }; }}
-    onPointerMove={event => { const d = drag.current; if (!d) return; const dx = event.clientX - d.start.x, dy = event.clientY - d.start.y; if (Math.hypot(dx, dy) > 5) { d.moved = true; setDragging(true); } if (d.moved) setPosition(clamp({ x: d.from.x + dx, y: d.from.y + dy })); }}
-    onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={() => { if (drag.current) { moved.current = true; drag.current = null; setDragging(false); } }}
-    onClick={event => { event.stopPropagation(); if (event.detail === 0 || !moved.current) open(); moved.current = false; }}>
-    <MuseIcon profile={profile}/><span className="muse-floating-name">{profile.muse.name}<span className="muse-presence"/></span>
-    {activity.label && <span className="muse-floating-activity" role="status">{activity.label}</span>}
-  </button>;
-}
 
 function NoteCard({ noteKey, value, draft, error, expanded, saving, onExpand, onEdit, onChange, onSave, onCancel }: { noteKey: NoteKey; value?: Note; draft?: Draft; error?: string; expanded: boolean; saving: boolean; onExpand: () => void; onEdit: () => void; onChange: (content: string) => void; onSave: () => void; onCancel: () => void }) {
   const Icon = noteKey === 'soul' ? Heart : BookOpen;
@@ -69,9 +28,9 @@ function NoteCard({ noteKey, value, draft, error, expanded, saving, onExpand, on
 
 export function MuseCompanion(props: Props) {
   const { isLoaded, isSignedIn, user } = useUser();
+  const clerk = useClerk();
   useEffect(() => { props.onOpenChange(false); }, [user?.id, props.onOpenChange]);
-  if (!isLoaded) return null;
-  if (!isSignedIn) return null;
+  if (!isSignedIn || !user) return <div data-muse-ui="true" className="muse-interface"><FloatingMuse obstacles={props.obstacles} activity={{ label: '' }} open={() => { if (isLoaded) clerk.openSignIn(); }}/></div>;
   return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
 
@@ -148,10 +107,10 @@ function OwnedMuse({ open, onOpenChange, obstacles, thread, boardContext, addToB
     if (result.ids.length) workTimers.current.push(setTimeout(() => setActivity({ label: '' }), result.ids.length * 1100 + 1600));
     return result;
   }
-  if (!profile) return <div data-muse-ui="true" className="muse-interface"><nav className="muse-tabs" aria-label="Your account"><span className="muse-account"><UserButton/></span></nav>{error && <div className="muze-toast" role="alert">{error}</div>}</div>;
+  if (!profile) return <div data-muse-ui="true" className="muse-interface"><nav className="muse-tabs" aria-label="Your account"><span className="muse-account"><UserButton/></span></nav><FloatingMuse obstacles={obstacles} activity={activity} open={() => setChatOpen(true)}/>{error && <div className="muze-toast" role="alert">{error}</div>}</div>;
   return <div data-muse-ui="true" className="muse-interface">
     <nav className="muse-tabs" aria-label="Workspace views"><button aria-current={!open ? 'page' : undefined} onClick={() => onOpenChange(false)}><SquarePen size={15}/><span>Whiteboard</span></button><button aria-current={open ? 'page' : undefined} aria-label="Edit my Muse" onClick={() => onOpenChange(true)}><Cloud size={16}/><span>Edit my Muse</span></button><span className="muse-account"><UserButton/></span></nav>
-    {!open && <FloatingMuse profile={profile} open={() => setChatOpen(value => !value)} obstacles={obstacles} activity={activity}/>}
+    {!open && <FloatingMuse profile={profile} open={() => setChatOpen(value => !value)} obstacles={obstacles} activity={activity} chatOpen={chatOpen}/>}
     {!open && <MuseChat key={thread} hidden={!chatOpen} profile={profile} thread={thread} boardContext={boardContext} close={() => setChatOpen(false)} edit={() => onOpenChange(true)} locked={clear} onThinking={thinking} applyActions={apply} addToBoard={text => { addToBoard(text); setChatOpen(false); }}/ >}
     {open && <section className="muse-space" aria-label="Muse private space">
       <header className="muse-space-top"><button className="muse-back" onClick={() => onOpenChange(false)}><ArrowLeft size={16}/><span>Back to whiteboard</span></button><span className="muse-owner"><span>{profile.ownerName.slice(0, 1)}</span>{profile.ownerName}</span></header>

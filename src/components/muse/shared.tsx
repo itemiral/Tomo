@@ -1,6 +1,6 @@
 'use client';
 
-import { Cloud } from 'lucide-react';
+import { MuseOrb } from './orb';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -12,8 +12,8 @@ export async function museRequest<T>(url: string, options?: RequestInit): Promis
   if (!response.ok) throw new RequestError(result.error || 'Could not open your Muse. Try again.', response.status);
   return result as T;
 }
-export function MuseIcon({ profile }: { profile: MuseProfile }) {
-  return <span className="muse-avatar" aria-hidden="true">{profile.muse.iconVersion ? <img key={profile.muse.iconVersion} src={'/api/muse/avatar?v=' + profile.muse.iconVersion} alt="" draggable={false}/> : <Cloud size={32} strokeWidth={1.3}/>}</span>;
+export function MuseIcon({ profile, followCursor = false }: { profile?: MuseProfile | null; followCursor?: boolean }) {
+  return <span className={'muse-avatar' + (profile?.muse.iconVersion ? '' : ' muse-avatar-orb')} aria-hidden="true">{profile?.muse.iconVersion ? <img key={profile.muse.iconVersion} src={'/api/muse/avatar?v=' + profile.muse.iconVersion} alt="" draggable={false}/> : <MuseOrb followCursor={followCursor}/>}</span>;
 }
 export function MuseMarkdown({ text }: { text: string }) {
   return <div className="muse-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span className="muse-image-label">{alt || 'Image'}</span>, a: ({ children, href }) => href && /^https?:\/\//i.test(href) ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span> }}>{text}</Markdown></div>;

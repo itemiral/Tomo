@@ -14,6 +14,7 @@ function fixtureBundle() {
       build.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ loader: 'tsx', resolveDir: resolve('.'), contents: `
         import { useState, useEffect } from 'react';
         export function useUser() { const [id,setId]=useState(window.fixtureOwner || 'owner-a'); useEffect(()=>{const change=()=>setId(window.fixtureOwner);window.addEventListener('fixture-owner',change);return()=>window.removeEventListener('fixture-owner',change)},[]);return {isLoaded:true,isSignedIn:!!id,user:id?{id}:null}; }
+        export const useClerk = () => ({openSignIn() { window.fixtureSignInOpened = true; }});
         export const SignInButton = ({children}) => children;
         export const SignUpButton = ({children}) => children;
         export const UserButton = () => <button aria-label="Sign out" onClick={()=>{window.fixtureOwner=null;window.dispatchEvent(new Event('fixture-owner'))}}>Account</button>;

@@ -113,4 +113,23 @@
 .muse-chat[hidden]{display:none}
 .muse-applied{display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--muted);margin-top:9px}
 .muse-applied>span{display:flex;align-items:center;gap:5px}
+.muse-floating{transition:left 1s cubic-bezier(.2,.8,.2,1),top 1s cubic-bezier(.2,.8,.2,1)}
+.muse-floating.roaming{transition-duration:3.2s;transition-timing-function:cubic-bezier(.4,0,.2,1)}
+.muse-floating.held,.muse-floating.dragging{transition:none}
+.muse-floating>.muse-avatar{width:80px;height:80px;border-radius:50%}
+.muse-avatar.muse-avatar-orb{background:transparent;border:0;overflow:visible;box-shadow:none}
+.muse-floating:hover>.muse-avatar-orb{box-shadow:none}
+.muse-orb{position:relative;display:block;width:100%;height:100%;border:1px solid #414246;border-radius:36% 43% 36% 42% / 41% 35% 43% 38%;background:#27282a;rotate:var(--muse-turn,0deg);box-shadow:0 5px 14px #11182710;pointer-events:none}
+.muse-floating-shadow{position:absolute;top:77px;left:50%;width:48px;height:7px;transform:translateX(-50%);border-radius:50%;background:#11182714;filter:blur(4px);pointer-events:none;animation:muse-shadow 6s ease-in-out infinite}
+.muse-orb-face{position:absolute;inset:0;translate:var(--muse-gaze-x,0px) var(--muse-gaze-y,0px)}
+.muse-orb-eyes{position:absolute;inset:0}
+.muse-orb-eyes i{position:absolute;left:30.77%;top:32.75%;width:10.26%;height:22.5%;border-radius:7px;background:#efeff1;animation:muse-blink 6.7s ease-in-out infinite}
+.muse-orb-eyes i+i{left:58.97%}
+.muse-floating.dragging>.muse-avatar{transform:scale(1.06) rotate(-4deg)}
+.muse-floating.working .muse-orb{border-color:#75789a;box-shadow:0 0 0 3px #5277ee12,0 8px 22px #0002}
+.muse-chat>header>.muse-avatar-orb{width:34px;height:34px;border-radius:50%}
+@keyframes muse-blink{0%,40%,44%,90%,94%,100%{scale:1 1}42%,92%{scale:1 .12}}
+@keyframes muse-shadow{0%,100%{opacity:.7;scale:1}50%{opacity:.35;scale:.85}}
+@media(max-width:700px){.muse-floating>.muse-avatar{width:64px;height:64px;border-radius:50%}.muse-floating-shadow{top:61px;width:38px}}
+@media(prefers-reduced-motion:reduce){.muse-orb-eyes i,.muse-floating-shadow{animation:none}.muse-orb{rotate:none}}
 @media(prefers-reduced-motion:reduce){.muse-floating,.muse-floating>.muse-avatar,.muse-floating.working .muse-presence{animation:none;transition:none}}

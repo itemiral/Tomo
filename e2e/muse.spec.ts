@@ -14,15 +14,50 @@ test('Clerk exposes Google sign-in and keeps private Muse routes closed to anony
   expect((await request.post('/api/muse/chat', { headers: { Origin: origin }, data: {} })).status()).toBe(401);
   expect((await request.put('/api/muse/avatar', { headers: { Origin: 'https://other.invalid' }, data: {} })).status()).toBe(403);
   expect((await request.post('/api/muse/session', { headers: { Origin: origin }, data: {} })).status()).toBe(405);
+  const privateRequests: string[] = [];
+  page.on('request', value => { if (new URL(value.url()).pathname.startsWith('/api/muse/')) privateRequests.push(value.url()); });
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Edit my Muse', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Talk to Muse' })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in to share', exact: true }).click();
   await expect(page.getByRole('button', { name: /Google/ })).toBeVisible();
+  await page.locator('.cl-modalCloseButton').click();
+  await page.getByRole('button', { name: 'Talk to Muse' }).click();
+  await expect(page.getByRole('button', { name: /Google/ })).toBeVisible();
+  expect(privateRequests).toEqual([]);
   await page.screenshot({ path: 'verification/muze-clerk-sign-in.png' });
 });
 
 // These component fixtures replace network responses and Clerk UI only in the test bundle.
 // The real server authorization boundary is exercised separately above.
+test('Muse looks toward the pointer, floats through open space, and can be grabbed or moved with the keyboard', async ({ page }) => {
+  await museFixture(page);
+  const muse = page.getByRole('button', { name: 'Talk to Muse' });
+  const face = muse.locator('.muse-orb');
+  const gaze = () => face.evaluate(element => parseFloat(element.style.getPropertyValue('--muse-gaze-x')));
+  await page.mouse.move(600, 400);
+  await expect.poll(gaze).toBeGreaterThan(4);
+  await page.mouse.move(0, 650);
+  await expect.poll(gaze).toBeLessThan(-1);
+  const start = (await muse.boundingBox())!;
+  await page.mouse.move(700, 400);
+  await expect.poll(async () => Math.abs((await muse.boundingBox())!.x - start.x), { timeout: 11000 }).toBeGreaterThan(45);
+  const drifting = (await muse.boundingBox())!;
+  await page.mouse.move(drifting.x + 40, drifting.y + 35);
+  const grabbed = (await muse.boundingBox())!;
+  await page.mouse.down();
+  await page.mouse.move(grabbed.x + 240, grabbed.y - 65, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.getByRole('complementary', { name: 'Chat with Muse' })).toBeHidden();
+  const dropped = (await muse.boundingBox())!;
+  expect(dropped.x - grabbed.x).toBeCloseTo(200, 0);
+  expect(dropped.y - grabbed.y).toBeCloseTo(-100, 0);
+  await muse.press('ArrowRight');
+  await expect.poll(async () => (await muse.boundingBox())!.x).toBeCloseTo(dropped.x + 16, 0);
+  await muse.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled();
+});
+
 test('private notes edit, persist, handle conflicts, and stay out of whiteboard exports', async ({ page }) => {
   const fixture = await museFixture(page);
   await page.getByRole('button', { name: 'Edit my Muse', exact: true }).click();
