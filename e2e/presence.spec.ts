@@ -143,6 +143,7 @@ test('Muse status is public metadata only and private notebooks, sign-out, and u
   const bus = transport(), a = await browser.newContext(), b = await browser.newContext();
   try {
     const ada = await a.newPage(), bo = await b.newPage();
+    await ada.clock.install();
     await fixture(ada, bus, 'ada'); await fixture(bo, bus, 'bo');
     await expect(bo.getByLabel('People on this board')).toContainText('Ada');
     await ada.getByRole('button', { name: 'Toggle Muse work', exact: true }).click();
@@ -160,6 +161,7 @@ test('Muse status is public metadata only and private notebooks, sign-out, and u
     await expect(bo.getByLabel('Ada’s cursor', { exact: true })).toHaveCount(0);
     await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toHaveCount(0);
     await expect(bo.getByLabel('People on this board')).not.toContainText('Ada');
+    await ada.clock.fastForward(33000);
     await ada.getByRole('button', { name: 'Private notebook', exact: true }).click();
     await expect(bo.getByLabel('People on this board')).toContainText('Ada');
     await ada.getByRole('button', { name: 'Sign out', exact: true }).click();
