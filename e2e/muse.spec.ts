@@ -92,7 +92,8 @@ test('Muse moves to its work, adds spaced editable notes, and returns to its res
   await expect.poll(async () => (await muse.boundingBox())!.x).toBeGreaterThan(300);
   await expect(page.locator('.muse-chat-messages')).toBeHidden();
   await chat(page); await send(page);
-  await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
+  await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
+  await expect(page.getByText('Updated your board · Undo available', { exact: true })).toHaveCount(0);
   const plan = await exported(page);
   expect(plan.objects).toHaveLength(3);
   for (const [i, a] of plan.objects.entries()) for (const b of plan.objects.slice(i + 1)) expect(a.left + a.width <= b.left || b.left + b.width <= a.left || a.top + a.height <= b.top || b.top + b.height <= a.top).toBe(true);
@@ -119,7 +120,7 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
     await expect(page.getByRole('button', { name: 'Attach image', exact: true })).toBeVisible();
   };
   await chat(page); await expectDirectChat(); await send(page);
-  await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
+  await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
   const plan = await exported(page), first = plan.objects[0], second = plan.objects[1];
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -349,7 +350,7 @@ test('More stays anchored and preserves document drafts with keyboard and narrow
 });
 
 test('generated notes use stable organic poses and honor explicit aligned layouts',async({page})=>{
- const fixture=await museFixture(page);await send(page,'Brainstorm a project');await expect(page.getByText('Updated your board · Undo available')).toBeVisible();
+ const fixture=await museFixture(page);await send(page,'Brainstorm a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
  const first=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(first.some((o:{angle:number})=>Math.abs(o.angle)>0)).toBe(true);await page.getByRole('button',{name:'Close Muse chat'}).click();await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await exported(page)).objects).toHaveLength(0);await page.getByRole('button',{name:'Redo',exact:true}).click();const restored=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(restored.map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));await page.reload();expect(JSON.parse((await exported(page)).text).board.pages[0].objects.map((o:any)=>[o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.left,o.top,o.angle]));
  fixture.response(async()=>({cards:[{id:'aligned-a',title:'First',body:'A short note'},{id:'aligned-b',title:'Second',body:'Another short note'}],updates:[]}));await send(page,'Add two notes aligned in a grid');await expect.poll(async()=>JSON.parse((await exported(page)).text).board.pages[0].objects.length).toBe(5);const all=JSON.parse((await exported(page)).text).board.pages[0].objects;for(const o of all.filter((o:any)=>o.id.startsWith('aligned')))expect(o.angle).toBe(0);expect(all.filter((o:any)=>!o.id.startsWith('aligned')).map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));
 });

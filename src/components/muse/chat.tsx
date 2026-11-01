@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, Plus, X } from 'lucide-react';
+import { ArrowUp, Plus, X } from 'lucide-react';
 import { MuseMarkdown, museRequest, RequestError, type MuseProfile } from './shared';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
@@ -52,7 +52,7 @@ export function MuseChat({ attachImage, expand, beforeSend, profile, thread, boa
   }
   return <aside className={"muse-chat" + (hidden ? " collapsed" : "")} aria-label="Chat with Muse" data-muse-ui="true" onKeyDown={event => event.stopPropagation()}>
     <header hidden={hidden}><div><strong>{profile.muse.name}</strong><span>{busy ? 'Thinking…' : 'Here with you'}</span></div><button aria-label="Close Muse chat" onClick={close}><X size={18}/></button></header>
-    <div hidden={hidden} className="muse-chat-messages" aria-live="polite">{!messages.length && !pending && <p className="muse-chat-intro">What would you like to work on?</p>}{messages.map(message => <div className={'muse-message ' + message.role} key={message.id}><MuseMarkdown text={message.content}/>{applied[message.id] && <div className="muse-applied" role="status">{!!applied[message.id].ids.length && <span><Check size={12}/>Updated your board · Undo available</span>}{!!applied[message.id].skipped && <span>Kept {applied[message.id].skipped} card{applied[message.id].skipped === 1 ? '' : 's'} you changed or locked.</span>}</div>}</div>)}{pending && <div className="muse-message user"><MuseMarkdown text={pending}/></div>}{busy && <div className="muse-chat-thinking" role="status"><i/><i/><i/><span>Muse is thinking</span></div>}<div ref={tail}/></div>
+    <div hidden={hidden} className="muse-chat-messages" aria-live="polite">{!messages.length && !pending && <p className="muse-chat-intro">What would you like to work on?</p>}{messages.map(message => <div className={'muse-message ' + message.role} key={message.id}><MuseMarkdown text={message.content}/>{!!applied[message.id]?.skipped && <div className="muse-applied" role="status"><span>Kept {applied[message.id].skipped} card{applied[message.id].skipped === 1 ? '' : 's'} you changed or locked.</span></div>}</div>)}{pending && <div className="muse-message user"><MuseMarkdown text={pending}/></div>}{busy && <div className="muse-chat-thinking" role="status"><i/><i/><i/><span>Muse is thinking</span></div>}<div ref={tail}/></div>
     {busy && <button type="button" onClick={()=>{controller.current?.abort();controller.current=null;setBusy(false);setPending('');onThinking(false);}}>Stop response</button>}
     {error && <p className="muse-chat-error" role="alert">{error}</p>}
     <form onSubmit={event => { event.preventDefault(); void send(); }}>
