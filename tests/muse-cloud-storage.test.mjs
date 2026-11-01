@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile as readDiskFile, mkdtemp, rm, writeFile as writeDiskFile } from 'node:fs/promises';
+import { readFile as readDiskFile, readdir, mkdtemp, rm, writeFile as writeDiskFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +21,12 @@ await db.exec(`
   grant usage on schema auth to anon, authenticated;
   grant execute on function auth.jwt() to anon, authenticated;
 `);
-await db.exec(await readDiskFile(new URL('../supabase/migrations/20261101191930_private_muse_storage.sql', import.meta.url), 'utf8'));
+const migrations = new URL('../supabase/migrations/', import.meta.url);
+for (const suffix of ['_private_muse_storage.sql', '_shared_board_invitations.sql', '_board_conflict_responses.sql']) {
+  const name = (await readdir(migrations)).find(name => name.endsWith(suffix));
+  assert.ok(name);
+  await db.exec(await readDiskFile(new URL(name, migrations), 'utf8'));
+}
 after(async () => { await db.close(); await rm(localDirectory, { recursive: true, force: true }); });
 
 function asUser(ownerId, operation, role = 'authenticated') {
@@ -63,6 +68,19 @@ function client(ownerId) {
 
 const cloud = (owner, operation) => withMuseStorage(owner, client(owner), operation);
 
+test('initial Muse creation retries a bounded application conflict', async () => {
+  const owner = 'user_initial_conflict', connection = client(owner);
+  const original = connection.rpc;
+  let commits = 0;
+  connection.rpc = async (name, args) => {
+    if (name === 'commit_muse_files' && ++commits === 1) return { data: null, error: { code: 'PT409', message: 'Document changed' } };
+    return original(name, args);
+  };
+  await withMuseStorage(owner, connection, () => ensureMuse(owner));
+  assert.equal(commits, 2);
+  assert.ok((await cloud(owner, () => readMuseNote(owner, 'soul'))).content.length);
+});
+
 test('cloud notebooks survive requests and keep each owner’s canonical files private', async () => {
   const first = await cloud('user_alice', () => readMuseCanvas('user_alice'));
   first.board.pages[0].objects.find(o => o.id === 'muse-file-memory').markdown = '# Memory\nPrivate preference';
@@ -95,7 +113,7 @@ test('a stale multi-file save rolls back every document', async () => {
     await asUser(owner, tx => tx.query("update public.muse_private_files set content=$1,version=gen_random_uuid() where name='soul.md'", [Buffer.from('Newer edit').toString('base64')]));
     await writeFile(path, 'Stale edit');
     await writeFile(join(museDirectory(owner), 'memory.md'), 'Must not commit');
-  })), { status: 409 });
+  })), { status: 409, code: 'PT409' });
   assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, 'Newer edit');
   assert.doesNotMatch((await cloud(owner, () => readMuseNote(owner, 'memory'))).content, /Must not commit/);
   await assert.rejects(cloud(owner, () => saveMuseNote(owner, 'soul', 'Old revision', original.revision)), { status: 409 });

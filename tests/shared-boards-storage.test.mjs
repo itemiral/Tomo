@@ -14,7 +14,7 @@ await db.exec(`
   grant execute on function auth.jwt() to anon, authenticated;
 `);
 const migrations = new URL('../supabase/migrations/', import.meta.url);
-for (const suffix of ['_private_muse_storage.sql', '_shared_board_invitations.sql']) {
+for (const suffix of ['_private_muse_storage.sql', '_shared_board_invitations.sql', '_board_conflict_responses.sql']) {
   const name = (await readdir(migrations)).find(name => name.endsWith(suffix));
   assert.ok(name);
   await db.exec(await readFile(new URL(name, migrations), 'utf8'));
@@ -80,7 +80,7 @@ test('stale saves fail without overwriting another member and direct writes cann
   const next = await action('co-writer', 'save', { id, revision: created.revision, board: { ...created.board, name: 'Newer title' } });
   assert.notEqual(next.revision, created.revision);
   assert.equal(next.role, 'editor');
-  await assert.rejects(action('writer', 'save', { id, revision: created.revision, board: created.board }), { code: '40001' });
+  await assert.rejects(action('writer', 'save', { id, revision: created.revision, board: created.board }), { code: 'PT409' });
   const stored = (await asUser('writer', tx => tx.query('select name from public.shared_boards where id=$1', [id]))).rows[0];
   assert.equal(stored.name, 'Newer title');
   for (const sql of [

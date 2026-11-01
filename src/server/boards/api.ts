@@ -14,7 +14,7 @@ export function boardFailure(error: unknown) {
   return boardJson({ error: 'Could not open this board. Try again.' }, 500);
 }
 function databaseFailure(error: { code?: string; message?: string }) {
-  const status = error.code === '40001' ? 409 : error.code === '42501' ? 403
+  const status = ['PT409', '40001'].includes(error.code || '') ? 409 : error.code === '42501' ? 403
     : ['PGRST301', 'PGRST303'].includes(error.code || '') ? 401
     : error.code === '22023' || error.code === '23514' ? 400 : error.code === '54000' ? 429 : 503;
   const message = status === 401 ? 'Sign in to open this board.' : status === 503 ? 'Board storage is unavailable. Try again.'

@@ -42,7 +42,7 @@ function fileName(path, current, allowDirectory = false) {
 }
 
 function databaseError(error) {
-  if (error.code === '40001') return new StorageError(409, 'This notebook changed elsewhere. Reload before saving.', error.code);
+  if (['PT409', '40001'].includes(error.code)) return new StorageError(409, 'This notebook changed elsewhere. Reload before saving.', error.code);
   if (error.status === 401 || error.name === 'SupabaseSessionError' || error.code === '42501' || error.code === 'PGRST301' || error.code === 'PGRST303') return new StorageError(401, 'Sign in again to open your Muse.', error.code);
   return new StorageError(503, 'Muse storage is unavailable. Try again.', error.code);
 }
@@ -82,7 +82,7 @@ export async function withStorageTransaction(operation, retries = 0) {
         return result;
       });
     } catch (error) {
-      if (error.code !== '40001' || attempt >= retries) throw error;
+      if (!['PT409', '40001'].includes(error.code) || attempt >= retries) throw error;
     }
   }
 }
