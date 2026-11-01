@@ -8,7 +8,7 @@ type Position = { x: number; y: number };
 export type Obstacle = Position & { id?: string; w: number; h: number };
 export type MuseActivity = { label: string; targetId?: string };
 type Props = { profile?: MuseProfile | null; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
-const controls = '.muze-header,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
+const controls = '.muze-header,.muze-always-styles,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
 
 export function FloatingMuse({ profile, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
   const button = useRef<HTMLButtonElement>(null);

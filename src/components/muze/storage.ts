@@ -49,6 +49,8 @@ function validObject(value: unknown, depth = 0): boolean {
   if (!record(value) || depth > 12 || !allowedTypes.has(String(value.type))) return false;
   if (['left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle', 'opacity', 'strokeWidth', 'fontSize', 'bend', 'boxHeight', 'inset'].some(key => value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || Math.abs(value[key] as number) > 1_000_000))) return false;
   if(value.sourceUrl!==undefined){try{if(typeof value.sourceUrl!=='string'||value.sourceUrl.length>2048)return false;const url=new URL(value.sourceUrl);if(url.protocol!=='https:'||url.username||url.password)return false;}catch{return false;}}
+  if(value.attribution!==undefined&&(typeof value.attribution!=='string'||value.attribution.length>1100))return false;
+  if(value.imageUrl!==undefined){try{if(typeof value.imageUrl!=='string'||value.imageUrl.length>2048)return false;const url=new URL(value.imageUrl);if(url.protocol!=='https:'||url.username||url.password)return false;}catch{return false;}}
   if(value.sourceTitle!==undefined&&(typeof value.sourceTitle!=='string'||value.sourceTitle.length>200))return false;
   if (value.src !== undefined && (typeof value.src !== 'string' || !/^data:image\/(png|jpeg|webp|gif);base64,/i.test(value.src))) return false;
   if (['fill', 'stroke', 'backgroundColor'].some(key => value[key] != null && (typeof value[key] !== 'string' || !/^(#[\da-f]{3,8}|rgba?\([\d.,% ]+\)|transparent|none|black|white|)$/i.test(value[key] as string)))) return false;

@@ -69,7 +69,7 @@ export async function museFixture(page: Page) {
       }
       const result=canvases.get(owner)!;return route.fulfill({json:req.method()==='PUT'?{name:names.get(owner)||'Muse',revision:result.revision,notes:result.notes}:result});
     }
-    if(key==='tasks'){const body=req.method()==='POST'?req.postDataJSON():null,id=owner+':'+(body?.thread||url.searchParams.get('thread'));if(body?.action==='create')tasks.set(id,{id:'task-1',goal:body.goal,status:'paused',cursor:0,attempts:0,steps:[{name:'Plan',status:'pending'},{name:'Compose',status:'pending'}],notes:[],sources:[]});if(body?.action==='cancel'&&tasks.has(id))tasks.get(id).status='cancelled';return route.fulfill({json:{task:tasks.get(id)||null,enabled:false}});}
+    if(key==='tasks'){const body=req.method()==='POST'?req.postDataJSON():null,id=owner+':'+(body?.thread||url.searchParams.get('thread'));if(body?.action==='create')tasks.set(id,{id:'task-1',goal:body.goal,status:'paused',cursor:0,attempts:0,steps:[{name:'Plan',status:'pending'},{name:'Compose',status:'pending'}],notes:[],sources:[]});if(body?.action==='step'&&tasks.has(id)){const t=tasks.get(id);t.steps[t.cursor].status='done';t.cursor++;t.attempts++;t.status=t.cursor===t.steps.length?'done':'paused';}if(body?.action==='cancel'&&tasks.has(id))tasks.get(id).status='cancelled';return route.fulfill({json:{task:tasks.get(id)||null,enabled:true}});}
     if(key==='image')return route.fulfill({json:{src:defaultAvatar,sourceUrl:'https://example.org/photo.png',sourceTitle:'example.org',retrievedAt:'2026-11-01T00:00:00Z'}});
     if (key === 'board') { if (!boards.has(owner)) boards.set(owner, {cards: [], comments: [], revision: 'initial'}); if(req.method()==='PUT') boards.set(owner, {...req.postDataJSON(), revision: 'rev-'+ ++turn}); return route.fulfill({json: boards.get(owner)}); }
     if (key === 'soul' || key === 'memory') {
@@ -84,7 +84,7 @@ export async function museFixture(page: Page) {
       return route.fulfill({ json: { key, ...notes.get(id) } });
     }
     if (key === 'avatar') {
-      if(req.method()==='POST') {generated=true;return route.fulfill({json:{candidateVersion:'gaze-test',gazeVersion:null}});}
+      if(req.method()==='POST') {generated=true;activated=true;icon=req.postDataJSON().source||icon;return route.fulfill({json:{status:'completed',iconVersion:'test-icon',gazeVersion:'gaze-test'}});}
       if(req.method()==='PUT' && req.postDataJSON().action==='activate') {activated=true;return route.fulfill({json:{gazeVersion:'gaze-test',candidateVersion:'gaze-test'}});}
       if (req.method() === 'PUT') { icon = req.postDataJSON().source || req.postDataJSON().image; return route.fulfill({ json: { iconVersion: 'test-icon' } }); }
       return route.fulfill({ contentType: 'image/png', body: Buffer.from((icon||defaultAvatar).split(',')[1], 'base64') });

@@ -20,3 +20,9 @@ test('ordinary-board model requests include current saved notebook preferences a
   snapshot=await readMuseCanvas(owner);snapshot.board.pages[0].objects=snapshot.board.pages[0].objects.filter(o=>o.id!=='cat-preference');await saveMuseCanvas(owner,snapshot);assert.doesNotMatch(await ask(owner,'ordinary:page-one'),/Please use short sentences/);assert.doesNotMatch(await ask('different-owner','ordinary:page-one'),/Please use short sentences|Please sound like a cat/);
  }finally{globalThis.fetch=original;}
 });
+
+test('normal chat runs real search orchestration with citations and no notebook in the search request',async()=>{
+ delete process.env.MUSE_AGENT_ENABLED;const original=globalThis.fetch,calls=[];
+ globalThis.fetch=async(url,options)=>{const request=JSON.parse(options.body);calls.push({url,request});if(url.endsWith('/responses'))return new Response(JSON.stringify({status:'completed',output:[{type:'web_search_call',status:'completed'},{type:'message',content:[{type:'output_text',text:'A verified public finding.',annotations:[{type:'url_citation',url:'https://example.org/evidence',title:'Actual evidence',start_index:0,end_index:25}]}]}]}));return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Here is the finding.',cards:[],updates:[]})}}]}));};
+ try{const result=await askMuse('chat-search-test',{thread:'board:search',message:'Search the web for public gardens',board:JSON.stringify({board:'Test',page:'One',objects:[]})},new AbortController().signal);assert.equal(calls.length,2);assert.equal(calls[0].request.input[1].content,'Search the web for public gardens');assert.doesNotMatch(JSON.stringify(calls[0].request),/Soul.md|Memory.md|Private Muse/);assert.match(calls[1].request.messages.at(-1).content,/A verified public finding/);assert.match(result.messages.at(-1).content,/Actual evidence.*https:\/\/example.org\/evidence/);}finally{globalThis.fetch=original;}
+});

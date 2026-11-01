@@ -45,3 +45,14 @@ test('all supported memory cards and comments persist, enter context, and reject
  await assert.rejects(saveMuseBoard('context',start),/changed elsewhere/);
  await assert.rejects(saveMuseBoard('context',{...saved,cards:[{id:'media',kind:'image',text:'image'}]}),/Describe images/);
 });
+test('automatic replacement keeps active avatar until success, activates once and deduplicates billed requests',async()=>{
+ const {replaceAvatar}=await import('../scripts/muse-avatar.mjs');const {randomUUID}=await import('node:crypto');
+ await uploadAvatar('replace',source);const original=await readAvatar('replace'),sheet=await sharp({create:{width:768,height:768,channels:3,background:'#446688'}}).png().toBuffer();let release,calls=0;const gate=new Promise(r=>release=r);const body={source,operationId:randomUUID(),confirmCost:true,maxCostUsd:.01,shareWithMeta:true};
+ const promise=replaceAvatar('replace',body,new AbortController().signal,async()=>{calls++;await gate;return {ok:true,json:async()=>({data:[{b64_json:sheet.toString('base64')}]})};});
+ await new Promise(r=>setTimeout(r,30));assert.equal((await readAvatar('replace')).activeVersion,original.activeVersion);await assert.rejects(replaceAvatar('replace',{...body,operationId:randomUUID()},new AbortController().signal,()=>{throw Error('must not call')}),/being updated/);release();const result=await promise;assert.ok(result.gazeVersion);assert.equal((await readAvatar('replace')).active,true);assert.equal((await replaceAvatar('replace',body,new AbortController().signal,()=>{throw Error('duplicate')})).gazeVersion,result.gazeVersion);assert.equal(calls,1);
+});
+test('replacement cancellation/failure preserves active source and budget stops further billing',async()=>{
+ const {replaceAvatar,avatarOperation}=await import('../scripts/muse-avatar.mjs');const {randomUUID}=await import('node:crypto');await uploadAvatar('cancel',source);const original=await readAvatar('cancel');let calls=0;const abort=new AbortController(),body={source,operationId:randomUUID(),confirmCost:true,maxCostUsd:.01,shareWithMeta:true};
+ await assert.rejects(replaceAvatar('cancel',body,abort.signal,async()=>{calls++;abort.abort();throw Error('cancelled')}));assert.equal((await readAvatar('cancel')).version,original.version);assert.equal((await avatarOperation('cancel',body.operationId)).status,'cancelled');await assert.rejects(replaceAvatar('cancel',body,new AbortController().signal,()=>{throw Error('must not retry')}),/already submitted/);
+ process.env.MUSE_AVATAR_DAILY_BUDGET_USD='.01';await assert.rejects(replaceAvatar('cancel',{...body,operationId:randomUUID()},new AbortController().signal,()=>{calls++;}),/budget/);delete process.env.MUSE_AVATAR_DAILY_BUDGET_USD;assert.equal(calls,1);
+});

@@ -1,11 +1,13 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { avatar, checkOrigin, jsonBody, owner, privateFailure, privateJson, updateIcon } from '@/server/muse/private';
-import { readAvatar, uploadAvatar, generateAvatar, activateAvatar } from '../../../../../scripts/muse-avatar.mjs';
+import { readAvatar, uploadAvatar, activateAvatar, replaceAvatar, avatarOperation } from '../../../../../scripts/muse-avatar.mjs';
 
 export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   try {
-    const { profile } = await owner(request), saved = await readAvatar(profile.ownerId);
+    const { profile } = await owner(request);
+    const operation=request.nextUrl.searchParams.get('operation');if(operation)return privateJson(await avatarOperation(profile.ownerId,operation));
+    const saved = await readAvatar(profile.ownerId);
     if (!saved) return await avatar(profile);
     const sheet = request.nextUrl.searchParams.get('sheet') === 'true';
     const bytes = sheet ? (request.nextUrl.searchParams.get('v') === saved.activeVersion ? saved.activeSheet : saved.candidate) : saved.preview;
@@ -25,7 +27,8 @@ export async function PUT(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     checkOrigin(request, true);
-    const { profile } = await owner(request), body = await jsonBody(request, 4096);
-    return privateJson(await generateAvatar(profile.ownerId, body, request.signal));
+    const { profile } = await owner(request), body = await jsonBody(request, 14_000_000);
+    if(body.action==='replace')return privateJson(await replaceAvatar(profile.ownerId,body,request.signal));
+    return privateJson({error:'Choose Replace image to generate and apply an avatar.'},400);
   } catch (error) { return privateFailure(error); }
 }

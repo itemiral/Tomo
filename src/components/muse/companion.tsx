@@ -16,8 +16,10 @@ export function MuseCompanion(props:Props) {
  return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
 function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,addToBoard,applyActions,userId}:Props&{userId:string}) {
- const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[iconBusy,setIconBusy]=useState(false),[chatOpen,setChatOpen]=useState(false),[avatarConfirm,setAvatarConfirm]=useState(false),[activity,setActivity]=useState<MuseActivity>({label:''});
+ const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[iconBusy,setIconBusy]=useState(false),[chatOpen,setChatOpen]=useState(false),[avatarStatus,setAvatarStatus]=useState(''),[retryFile,setRetryFile]=useState<File|null>(null),[activity,setActivity]=useState<MuseActivity>({label:''});
  useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
+ const avatarRequest=useRef<AbortController|null>(null),lastOperation=useRef<string|null>(null);
+ useEffect(()=>()=>avatarRequest.current?.abort(),[]);
  const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),workTimers=useRef<ReturnType<typeof setTimeout>[]>([]);
  const stopActivity=useCallback(()=>{workTimers.current.forEach(clearTimeout);workTimers.current=[];setActivity({label:''});},[]);
  const thinking=useCallback((value:boolean)=>{stopActivity();if(value)setActivity({label:'Thinking…'});},[stopActivity]);
@@ -25,24 +27,26 @@ function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppe
  useEffect(()=>{if(chatRequest)setChatOpen(chatRequest>0);},[chatRequest]);
  useEffect(()=>{stopActivity();return()=>workTimers.current.forEach(clearTimeout);},[thread,stopActivity]);
  useEffect(()=>{const controller=new AbortController();void request<MuseProfile>('session',{signal:controller.signal}).then(v=>{if(!controller.signal.aborted&&v.ownerId===userId)setProfile(v);}).catch(e=>{if(!controller.signal.aborted)setError(e.message);});return()=>{controller.abort();ownerVersion.current++;};},[userId]);
-  async function changeIcon(file: File) {
-    const generation = ownerVersion.current; setIconBusy(true); setError('');
-    try {
-      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) || file.size > 10_000_000) throw new Error('Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
-      const source = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); });
-      const result = await request<Partial<MuseProfile['muse']>>('avatar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }) });
-      if (generation === ownerVersion.current) { setAvatarConfirm(false); setProfile(value => value ? { ...value, muse: { ...value.muse, gazeVersion: null, candidateVersion: null, ...result } } : value);await appearanceChanged?.(); }
-    } catch (cause) { if (cause instanceof RequestError && cause.status === 401) clear(); else if (generation === ownerVersion.current) setError(cause instanceof RequestError ? cause.message : 'That image could not be opened. Choose a PNG, JPEG, WebP, or GIF under 10 MB.'); }
-    finally { if (generation === ownerVersion.current) setIconBusy(false); }
+  async function refreshAvatar(operationId:string){
+    const generation=ownerVersion.current;const result=await request<Partial<MuseProfile['muse']>&{status:string}>('avatar?operation='+encodeURIComponent(operationId));
+    if(generation!==ownerVersion.current)return result.status;
+    if(result.status==='completed'){setProfile(p=>p?{...p,muse:{...p.muse,...result}}:p);await appearanceChanged?.();setRetryFile(null);setAvatarStatus('Avatar updated.');}
+    else setAvatarStatus(result.status==='running'?'Generation is still running. Check again shortly.':'Your current avatar is kept. Retry starts a new generation attempt.');
+    return result.status;
   }
-  async function generateIcon(activate = false) {
-    if (!profile || iconBusy) return;
-    const generation = ownerVersion.current; setIconBusy(true); setError(''); setAvatarConfirm(false);
-    try {
-      const result = await request<Partial<MuseProfile['muse']>>('avatar', { method: activate ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(activate ? { action: 'activate', version: profile.muse.candidateVersion } : { sourceVersion: profile.muse.iconVersion, confirmCost: true, shareWithMeta: true, maxCostUsd: 0.01 }) });
-      if (generation === ownerVersion.current) setProfile(value => value ? { ...value, muse: { ...value.muse, ...result } } : value);
-    } catch (cause) { if (generation === ownerVersion.current) setError((cause as Error).message); }
-    finally { if (generation === ownerVersion.current) setIconBusy(false); }
+  async function changeIcon(file: File) {
+    if(avatarRequest.current)return;
+    const generation=ownerVersion.current,abort=new AbortController();avatarRequest.current=abort;
+    setIconBusy(true);setError('');setAvatarStatus('Generating your avatar…');setRetryFile(file);
+    try{
+      if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)||file.size>10_000_000)throw new Error('Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
+      const source=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('Could not read that image.'));reader.readAsDataURL(file);});
+      if(abort.signal.aborted)return;
+      const operationId=crypto.randomUUID();lastOperation.current=operationId;
+      const result=await request<Partial<MuseProfile['muse']>>('avatar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'replace',source,operationId,confirmCost:true,shareWithMeta:true,maxCostUsd:.01}),signal:abort.signal});
+      if(generation===ownerVersion.current&&!abort.signal.aborted){setProfile(p=>p?{...p,muse:{...p.muse,...result}}:p);await appearanceChanged?.();setRetryFile(null);setAvatarStatus('Avatar updated.');}
+    }catch(cause){if(generation===ownerVersion.current){setAvatarStatus(abort.signal.aborted?'Stopped waiting. Your previous avatar stays visible; check status before retrying.':(cause as Error).message);if(cause instanceof RequestError&&cause.status===401)clear();}}
+    finally{if(avatarRequest.current===abort)avatarRequest.current=null;if(generation===ownerVersion.current)setIconBusy(false);}
   }
   function apply(actions: MuseActions) {
     stopActivity();
@@ -58,7 +62,7 @@ function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppe
  return <div data-muse-ui="true" className="muse-interface">
   {!open && <FloatingMuse profile={profile} open={()=>onOpenChange(true)} changeAvatar={()=>{openAppearance?.();}} chat={()=>setChatOpen(true)} obstacles={obstacles} activity={activity} chatOpen={chatOpen}/>}
   {profile && <div className="muse-chat-stack">{historyControls}<MuseChat key={thread} hidden={!chatOpen} expand={()=>setChatOpen(true)} beforeSend={beforeSend} profile={profile} thread={thread} boardContext={boardContext} close={()=>setChatOpen(false)} edit={()=>onOpenChange(true)} locked={clear} onThinking={thinking} applyActions={apply} addToBoard={addToBoard}/></div>}
-  {open && profile && appearanceSelected && <div className="muse-appearance-actions" style={{left:Math.max(12,Math.min(innerWidth-292,appearanceAnchor?.x||20)),top:Math.max(80,Math.min(innerHeight-300,appearanceAnchor?.y||120))}}><div className="muse-appearance-actions-content"><button className="muse-change-icon" aria-label="Change Muse icon" disabled={iconBusy} onClick={()=>iconInput.current?.click()}><Pencil size={15}/>Swap image</button>{iconBusy&&<p role="status">Updating avatar…</p>}{profile.muse.iconVersion&&<button disabled={iconBusy} onClick={()=>setAvatarConfirm(true)}>Generate gaze · $0.01</button>}{avatarConfirm&&<div role="group" aria-label="Confirm avatar generation"><p>Send this picture to Meta for one nine-view image? Maximum cost: $0.01.</p><button disabled={iconBusy} onClick={()=>void generateIcon()}>Confirm $0.01 generation</button><button onClick={()=>setAvatarConfirm(false)}>Cancel</button></div>}{profile.muse.candidateVersion&&profile.muse.candidateVersion!==profile.muse.gazeVersion&&<div className="muse-gaze-preview"><img alt="Nine generated gaze directions to review" src={'/api/muse/avatar?sheet=true&v='+profile.muse.candidateVersion}/><p>Check that every view still looks like your Muse.</p><button disabled={iconBusy} onClick={()=>void generateIcon(true)}>Use these gaze frames</button></div>}</div></div>}
+  {open && profile && (appearanceSelected||iconBusy) && <div className="muse-appearance-actions" style={{left:Math.max(12,Math.min(innerWidth-292,appearanceAnchor?.x||20)),top:Math.max(80,Math.min(innerHeight-300,appearanceAnchor?.y||120))}}><div className="muse-appearance-actions-content"><p id="avatar-replace-disclosure">Meta processes this image to generate and apply your avatar.</p><button className="muse-change-icon" aria-label="Change Muse icon" aria-describedby="avatar-replace-disclosure" disabled={iconBusy} onClick={()=>iconInput.current?.click()}><Pencil size={15}/>Replace image</button>{avatarStatus&&<p role="status">{avatarStatus}</p>}{iconBusy?<button onClick={()=>avatarRequest.current?.abort()}>Cancel generation</button>:retryFile&&<><button onClick={()=>{if(lastOperation.current)void refreshAvatar(lastOperation.current).catch(e=>setAvatarStatus(e.message));}}>Check generation status</button><button onClick={()=>void changeIcon(retryFile)}>Retry generation</button></>}</div></div>}
   <input type="file" ref={iconInput} hidden accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose Muse icon" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void changeIcon(file);}}/>
   {error&&<div className="muze-toast" role="alert">{error}</div>}
  </div>;

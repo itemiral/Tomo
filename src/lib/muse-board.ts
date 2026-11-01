@@ -1,6 +1,6 @@
 export type MuseActions = {
   layout?: 'organic' | 'aligned';
-  images?: {id:string;src:string;sourceUrl:string;sourceTitle:string;retrievedAt:string}[];
+  images?: {id:string;src:string;sourceUrl:string;sourceTitle:string;retrievedAt:string;imageUrl?:string;attribution?:string}[];
   cards: { id: string; title: string; body: string }[];
   updates: { id: string; text: string; expectedText: string }[];
 };

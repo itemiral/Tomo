@@ -19,7 +19,7 @@ declare module 'fabric' {
     frameId?: string; isLocked?: boolean; bend?: number; arrowStart?: Arrowhead; arrowEnd?: Arrowhead;
   }
 }
-FabricObject.customProperties = ['sourceUrl','sourceTitle','retrievedAt','markdown', 'documentTitle', 'id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign'];
+FabricObject.customProperties = ['imageUrl','attribution','sourceUrl','sourceTitle','retrievedAt','markdown', 'documentTitle', 'id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign'];
 Object.assign(FabricObject.ownDefaults, { originX: 'left', originY: 'top', transparentCorners: false, cornerColor: '#ffffff', cornerStrokeColor: '#3278ef', borderColor: '#3278ef', cornerSize: 8, touchCornerSize: 24, padding: 0, borderScaleFactor: 1, strokeUniform: true });
 
 let measuringContext: CanvasRenderingContext2D | null = null;

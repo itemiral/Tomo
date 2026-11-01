@@ -26,6 +26,7 @@ export class WhiteboardEngine {
   private history: string[] = [];
   private future: string[] = [];
   private loading = true;
+  private loadVersion = 0;
   private start: Point | null = null;
   private drawing: FabricObject | null = null;
   private pan: { x: number; y: number } | null = null;
@@ -130,6 +131,7 @@ export class WhiteboardEngine {
     window.addEventListener('paste', paste); this.disposers.push(() => window.removeEventListener('paste', paste));
   }
   async load(drawing: Drawing) {
+    this.loadVersion++;
     this.loading = true;
     await loadFonts();
     if (this.closed) return;
@@ -627,10 +629,10 @@ export class WhiteboardEngine {
   clearSelection(){this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.emit();}
   async addRemoteImage(item:NonNullable<MuseActions['images']>[number]) {
     if(!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(item.src)||item.src.length>16000000)return;
-    const canvas=this.canvas;
-    try{const image=await FabricImage.fromURL(item.src);if(this.closed||this.loading||!this.enabled||canvas.getObjects().some(o=>o.id===item.id))return;
+    const canvas=this.canvas,version=this.loadVersion;
+    try{const image=await FabricImage.fromURL(item.src);if(version!==this.loadVersion||this.closed||this.loading||!this.enabled||canvas.getObjects().some(o=>o.id===item.id))return;
       const center=this.center(),boxes=canvas.getObjects().map(o=>o.getBoundingRect());
-      image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(b=>b.left+b.width))+48:center.x,top:center.y-160,...{sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt}});image.scale(Math.min(1,420/image.width,320/image.height));canvas.add(image);this.setTool('select');canvas.setActiveObject(image);this.checkpoint();this.fit(true);
+      image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(b=>b.left+b.width))+48:center.x,top:center.y-160,...{sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt,imageUrl:item.imageUrl,attribution:item.attribution}});image.scale(Math.min(1,420/image.width,320/image.height));canvas.add(image);this.setTool('select');canvas.setActiveObject(image);this.checkpoint();this.fit(true);
     }catch{this.report('The image could not be placed.');}
   }
   async addImage(file: File) {
