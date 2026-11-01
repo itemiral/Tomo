@@ -183,7 +183,8 @@
 
 .muse-history-controls{max-width:100%;flex-wrap:wrap;justify-content:center}.muse-history-controls .muze-divider{height:18px;align-self:center}
 
-.muse-task-panel{padding:8px 14px;font-size:11px;max-height:220px;overflow:auto}.muse-task-panel summary{cursor:pointer;color:var(--muted)}.muse-task-panel p{line-height:1.5}.muse-task-panel button{padding:5px 8px;border:1px solid var(--line);border-radius:7px;margin:4px}.muse-task-panel input[type=url]{width:100%;padding:6px;border:1px solid var(--line);border-radius:6px}.muse-task-panel label{display:flex;align-items:center;gap:5px}
+.muse-task-panel{padding:8px 14px;font-size:11px;max-height:220px;overflow:auto}.muse-task-panel summary{cursor:pointer;color:var(--muted)}.muse-task-panel p{line-height:1.5}.muse-task-panel button{padding:5px 8px;border:1px solid var(--line);border-radius:7px;margin:4px}
+.muse-chat>form>button.muse-chat-attach{background:transparent;color:var(--muted);border:1px solid var(--line)}.muse-chat>form>button.muse-chat-attach:hover:not(:disabled){background:var(--hover);color:var(--ink)}.muse-chat>form>button.muse-chat-attach:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.muse-chat>form>button.muse-chat-attach:disabled{opacity:.5}
 
 .muse-name-editor{position:absolute;z-index:25;background:var(--canvas);padding:2px;font:24px/1.4 Inter;white-space:nowrap}.muse-name-editor input{font:inherit;width:160px;border:0;border-bottom:1px solid var(--blue);background:transparent;color:var(--ink)}.muse-name-editor button{font:12px Inter;margin-left:8px;color:var(--blue)}.muse-name-editor p{font:12px Inter;white-space:normal;max-width:400px}
 

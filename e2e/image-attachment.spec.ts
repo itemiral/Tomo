@@ -2,10 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { museFixture, exported } from './muse-fixture';
 
 async function openAttachments(page: Page) {
-  await page.getByRole('textbox', { name: 'Message Muse', exact: true }).click();
-  await page.getByText('Work through a task', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Attach image', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Attach image', exact: true })).toBeEnabled();
 }
+const imageInput = (page: Page) => page.getByLabel('Choose image attachment', { exact: true });
 
 async function imageFile(page: Page, noisy = false) {
   const source = await page.evaluate(noisy => {
@@ -24,11 +24,13 @@ async function imageFile(page: Page, noisy = false) {
   return { name: 'board-image.png', mimeType: 'image/png', buffer: Buffer.from(source.split(',')[1], 'base64') };
 }
 
-test('Attach image opens a file picker, adds a sized board image and supports undo without a model request', async ({ page }) => {
+test('the collapsed composer opens an image picker, adds a sized board image and supports undo without a model request', async ({ page }) => {
   await museFixture(page); const writes: string[] = [];
   page.on('request', request => { if (request.method() === 'POST' && /\/api\/muse\/(image|avatar|chat|tasks)(\?|$)/.test(request.url())) writes.push(request.url()); });
   const file = await imageFile(page, true); expect(file.buffer.length).toBeGreaterThan(4_500_000);
   await openAttachments(page);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
+  await expect(page.locator('.muse-task-panel')).toHaveCount(0);
   await expect(page.getByLabel('Image URL', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Add an image from a link', { exact: true })).toHaveCount(0);
   const chooser = page.waitForEvent('filechooser');
@@ -53,9 +55,9 @@ test('attachments reject unsupported files and preserve transparent pixels in th
   await page.getByRole('dialog', { name: 'Muse', exact: true }).getByRole('button', { name: 'Edit Muse', exact: true }).click();
   await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-muse-board', 'true');
   await openAttachments(page);
-  await page.getByLabel('Attach image', { exact: true }).setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Not an image') });
+  await imageInput(page).setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Not an image') });
   await expect(page.getByRole('alert')).toContainText('Choose a PNG, JPEG, WebP, or GIF under 10 MB.');
-  await page.getByLabel('Attach image', { exact: true }).setInputFiles(await imageFile(page));
+  await imageInput(page).setInputFiles(await imageFile(page));
   await expect(page.getByRole('button', { name: 'Attach image', exact: true })).toBeEnabled();
   const image = (await exported(page)).objects.find(object => object.type === 'Image' && object.id !== 'muse-appearance') as { id: string; src: string } | undefined;
   expect(image).toBeTruthy();
@@ -82,7 +84,7 @@ for (const destination of ['another board', 'another owner'] as const) test(`an 
       } else property.set!.call(this, value);
     } });
   });
-  await page.getByLabel('Attach image', { exact: true }).setInputFiles(file);
+  await imageInput(page).setInputFiles(file);
   await expect.poll(() => page.evaluate(() => typeof (window as any).releaseImage)).toBe('function');
   if (destination === 'another owner') await fixture.owner('owner-b');
   else {
@@ -93,4 +95,27 @@ for (const destination of ['another board', 'another owner'] as const) test(`an 
   await expect.poll(() => page.evaluate(() => !!(window as any).delayedImageLoaded)).toBe(true);
   expect((await exported(page)).objects.filter(object => object.type === 'Image')).toHaveLength(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('attachment, message and send controls remain on one compact row at 390px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await museFixture(page); await openAttachments(page);
+  const attach = page.getByRole('button', { name: 'Attach image', exact: true });
+  const message = page.getByRole('textbox', { name: 'Message Muse', exact: true });
+  const send = page.getByRole('button', { name: 'Send to Muse', exact: true });
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
+  await expect(attach).toHaveAttribute('title', 'Attach image');
+  await expect(attach).toHaveText('');
+  const boxes = await Promise.all([attach, message, send].map(control => control.boundingBox()));
+  expect(boxes.every(Boolean)).toBe(true);
+  const [plus, input, submit] = boxes.map(box => box!);
+  expect(plus.x).toBeGreaterThanOrEqual(0);
+  expect(plus.x + plus.width).toBeLessThanOrEqual(input.x + 1);
+  expect(input.x + input.width).toBeLessThanOrEqual(submit.x + 1);
+  expect(submit.x + submit.width).toBeLessThanOrEqual(390);
+  expect(input.width).toBeGreaterThan(150);
+  const sharedTop = Math.max(plus.y, input.y, submit.y);
+  const sharedBottom = Math.min(plus.y + plus.height, input.y + input.height, submit.y + submit.height);
+  expect(sharedBottom - sharedTop).toBeGreaterThan(20);
+  expect(Math.max(plus.height, input.height, submit.height)).toBeLessThanOrEqual(50);
 });

@@ -12,7 +12,7 @@ const running=new Map<string,AbortController>();
 export {readTask};
 export async function taskAction(owner:string,body:Record<string,unknown>,signal:AbortSignal){
  const thread=validThread(body.thread),key=owner+':'+thread;
- if(body.action==='create')return createTask(owner,thread,body.goal,body.research===true);
+ if(body.action==='create')return createTask(owner,thread,body.goal,body.research!==false);
  if(body.action==='cancel'){running.get(key)?.abort();return changeTask(owner,thread,(t:SavedTask)=>{if(t.status!=='done')t.status='cancelled';});}
  if(body.action==='recover'){if(running.has(key))throw new PrivateError(409,'This step is still running. Cancel it first.');return changeTask(owner,thread,(t:SavedTask)=>{if(t.status==='running'){t.status='paused';t.error='The previous request was interrupted. Usage may have occurred. Resume explicitly to retry.';}});}
  if(body.action!=='step')throw new PrivateError(400,'Unknown task action.');

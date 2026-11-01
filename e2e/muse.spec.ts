@@ -400,8 +400,21 @@ test('renaming Muse updates the canonical soul identity and undoes both together
  const input=page.locator('textarea[data-fabric="textarea"]');await expect(input).toHaveValue(expected('Luna'));await input.press('Escape');
 });
 
-test('tasks run automatically and reload',async({page})=>{
- await museFixture(page);await chat(page);await page.getByRole('textbox',{name:'Message Muse'}).fill('Plan a small garden');await page.getByText('Work through a task',{exact:true}).click();await page.getByRole('button',{name:'Run task from message'}).click();await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');await page.reload();await chat(page);await page.getByText('Work through a task',{exact:true}).click();await expect(page.locator('.muse-task-panel')).toContainText('Plan a small garden');await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
+test('tasks research automatically without a toggle and reload',async({page})=>{
+ const creates:Record<string,unknown>[]=[];
+ page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/api/muse/tasks'){const body=request.postDataJSON();if(body.action==='create')creates.push(body);}});
+ await museFixture(page);await chat(page);
+ await page.getByRole('textbox',{name:'Message Muse'}).fill('Plan a small garden');
+ await page.getByText('Work through a task',{exact:true}).click();
+ await expect(page.locator('.muse-task-panel').getByRole('checkbox')).toHaveCount(0);
+ await expect(page.getByText('Research the public web',{exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Run task from message'}).click();
+ await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
+ expect(creates).toHaveLength(1);expect(creates[0]).toMatchObject({goal:'Plan a small garden',research:true});
+ await page.reload();await chat(page);await page.getByText('Work through a task',{exact:true}).click();
+ await expect(page.locator('.muse-task-panel')).toContainText('Plan a small garden');
+ await expect(page.locator('.muse-task-panel')).toContainText('done · 2/6');
+ await expect(page.locator('.muse-task-panel').getByRole('checkbox')).toHaveCount(0);
 });
 
 test('automatic replacement uses image feedback, preserves the avatar on failure and only retries explicitly',async({page})=>{
