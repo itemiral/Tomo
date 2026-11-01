@@ -1,7 +1,14 @@
 import type { Board } from './storage';
 
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export function equalBoardValues(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((value, index) => equalBoardValues(value, b[index]));
+  if (!record(a) || !record(b)) return false;
+  const keys = Object.keys(a).filter(key => a[key] !== undefined), otherKeys = Object.keys(b).filter(key => b[key] !== undefined);
+  return keys.length === otherKeys.length && keys.every(key => Object.hasOwn(b, key) && equalBoardValues(a[key], b[key]));
+}
+const equal = equalBoardValues;
 const identified = (items: unknown[]): items is (Record<string, unknown> & {id: string})[] => items.every(item => record(item) && typeof item.id === 'string');
 export class BoardConflict extends Error {
   constructor() { super('Someone else changed the same part of this board. Your draft is kept. Save a copy before reloading the shared version.'); }

@@ -6,6 +6,7 @@ import { GRID_STEP } from './grid';
 import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
 import { FONTS, SIZES, loadFonts, pale, svgFonts } from './styles';
 import { download, filename, parseObjects, type Drawing } from './storage';
+import { equalBoardValues } from './shared-merge';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
 type EditableText = IText | Textbox | MuzeText | MuzeLabel | MuzeNote;
@@ -155,7 +156,7 @@ export class WhiteboardEngine {
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
   canReceiveSharedChanges() { return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !this.editing(); }
   async applySharedDrawing(drawing: Drawing) {
-    if (!this.canReceiveSharedChanges() || JSON.stringify(this.serialize().objects) === JSON.stringify(drawing.objects)) return;
+    if (!this.canReceiveSharedChanges() || equalBoardValues(this.serialize().objects, drawing.objects)) return;
     const tool = this.tool, paint = {...this.paint}, viewport = [...this.canvas.viewportTransform], selected = this.canvas.getActiveObjects().map(object => object.id);
     await this.load({...drawing,viewport});
     if (this.closed) return;
