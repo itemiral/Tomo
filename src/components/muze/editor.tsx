@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlignCenter, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, ArrowDownToLine, ArrowUpRight, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Hexagon, Heart, Cloud, LockKeyhole, UnlockKeyhole, FlipHorizontal2, FlipVertical2, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Scissors, Clipboard, Magnet, Bold, Italic, Underline, BringToFront, Check, ChevronDown, ChevronUp, Circle, Copy, Diamond, Download, Eraser, FilePlus2, FolderOpen, Frame, Grid2X2, Group, Hand, Highlighter, ImagePlus, Keyboard, Layers, Maximize, Menu, Minus, MoreHorizontal, MousePointer2, MoveUpRight, Pencil, Plus, Redo2, SendToBack, Settings2, Square, SquareDashed, Star, StickyNote, Sun, Moon, Trash2, Triangle, Type, Undo2, Ungroup, X, Zap } from 'lucide-react';
+import { AlignCenter, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignHorizontalJustifyStart, AlignLeft, AlignRight, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, AlignVerticalJustifyStart, ArrowDownToLine, ArrowUpRight, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Hexagon, Heart, Cloud, LockKeyhole, UnlockKeyhole, FlipHorizontal2, FlipVertical2, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Scissors, Clipboard, Magnet, Bold, Italic, Underline, BringToFront, Check, ChevronDown, ChevronUp, Circle, Copy, Diamond, Eraser, FilePlus2, FolderOpen, Frame, Grid2X2, Group, Hand, Highlighter, ImagePlus, Keyboard, Layers, Maximize, Menu, Minus, MoreHorizontal, MousePointer2, MoveUpRight, Pencil, Plus, Redo2, SendToBack, Settings2, Share2, Square, SquareDashed, Star, StickyNote, Sun, Moon, Trash2, Triangle, Type, Undo2, Ungroup, X, Zap } from 'lucide-react';
 import { WhiteboardEngine, INITIAL_EDITOR, INITIAL_PAINT, type EditorState, type Paint, type Tool } from './engine';
 import { download, filename, newBoard, newPage, openStorage, parseBoardFile, readStorage, saveStorage, type Board, type Drawing, type Workspace } from './storage';
 import { Point } from 'fabric';
@@ -12,6 +12,7 @@ import { MIN_ZOOM, MAX_ZOOM } from './zoom';
 import { createSaveFeedback } from './save-feedback';
 import './whiteboard.css';
 import { MuseCompanion } from '../muse/companion';
+import { SignInToShare } from '../muse/sign-in';
 import { boardContext as makeBoardContext } from '@/lib/muse-board';
 
 const TOOLS: Record<Tool, { name: string; icon: typeof MousePointer2; key: string; hint: string }> = {
@@ -96,7 +97,6 @@ export default function MuzeEditor() {
   const museActive = useRef(false); museActive.current = museOpen;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null), engine = useRef<WhiteboardEngine | null>(null);
-  const [status, setStatus] = useState('Opening…');
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
   const updateEditor = useCallback((value: EditorState) => { setEditor(value); setPaint(value.paint); }, []);
   const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(false), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
@@ -107,14 +107,14 @@ export default function MuzeEditor() {
 
   useEffect(() => {
     let cancelled = false;
-    const feedback = createSaveFeedback(setStatus, () => setToast('Could not save locally. Export a board file to keep your work.'));
+    const feedback = createSaveFeedback(() => {}, () => setToast('Could not save locally. Export a board file to keep your work.'));
     saveFeedback.current = feedback;
     void openStorage().then(async database => {
       if (cancelled) { database.close(); return; }
       db.current = database;
       const saved = await readStorage(database);
       if (cancelled) return;
-      current.current = saved; setWorkspace(saved); setStatus('Saved on this device');
+      current.current = saved; setWorkspace(saved);
       setDark(localStorage.getItem('muze.theme') === 'dark');
       setGrid(localStorage.getItem('muze.grid') === 'true');
     }).catch(() => { if (!cancelled) setToast('Local storage is unavailable. Enable browser storage and reload.'); });
@@ -201,13 +201,17 @@ export default function MuzeEditor() {
     {editor.guides.length > 0 && <svg className="muze-snap-guides" aria-hidden="true"><g transform={`translate(${editor.viewport[4]} ${editor.viewport[5]}) scale(${editor.zoom})`}>{editor.guides.map((line, index) => <line key={index} {...line} stroke="#e44b7a" strokeWidth={1 / editor.zoom} strokeDasharray={`${4 / editor.zoom} ${4 / editor.zoom}`}/>)}</g></svg>}
     <header className="muze-header">
       <div className="muze-project">
-        <span className="muze-brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V6l8 8 8-8v12"/></svg>Muse Board</span>
+        <span className="muze-brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V6l8 8 8-8v12"/></svg><span>Muse Board</span></span>
         <Button label="Main menu" onClick={() => togglePopup('menu')} active={popup === 'menu'}><Menu size={17}/></Button>
         <span className="muze-divider"/>
         <input aria-label="Board name" value={name} maxLength={160} onChange={event => setName(event.target.value)} onFocus={event => event.target.select()} onBlur={() => updateBoard(board => ({ ...board, name: name.trim() || 'Untitled board' }))} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }}/>
         <button className="muze-page-trigger" aria-label="Pages" onClick={() => togglePopup('pages')}><span>{page.name}</span><ChevronDown size={14}/></button>
       </div>
-      <div className="muze-header-right"><span className="muze-save" role="status" data-state={status === 'Not saved' ? 'error' : status === 'Saving…' ? 'saving' : 'saved'}>{status === 'Not saved' ? <span aria-hidden="true">!</span> : status === 'Saving…' ? <span className="muze-save-dot" aria-hidden="true"/> : <Check size={13}/>}<span>{status}</span></span><button className="muze-export" aria-label="Export" onClick={() => togglePopup('export')}><Download size={15}/><span>Export</span><ChevronDown size={12}/></button><Button label="Styles" className="muze-mobile-styles" onClick={() => setStylesOpen(!stylesOpen)}><Settings2 size={19}/></Button></div>
+      <div className="muze-header-right">
+        <Button label="Share" hint="Export an image or board file to share." active={popup === 'export'} className="muze-share" onClick={() => togglePopup('export')}><Share2 size={18} strokeWidth={1.7}/></Button>
+        <Button label="Styles" className="muze-mobile-styles" onClick={() => setStylesOpen(!stylesOpen)}><Settings2 size={19}/></Button>
+        <SignInToShare/>
+      </div>
     </header>
 
     <aside className={'muze-style-panel' + (stylesOpen ? ' show' : '')} aria-label="Drawing styles">

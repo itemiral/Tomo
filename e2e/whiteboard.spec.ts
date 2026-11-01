@@ -11,7 +11,7 @@ async function stroke(page: Page, tool: string, from = { x: 300, y: 240 }, to = 
   await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 12 }); await page.mouse.up();
 }
 async function save(page: Page) {
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
   await page.getByRole('menuitem', { name: 'Muse Board file', exact: true }).click();
   const file = await pending, bytes = await readFile((await file.path())!);
@@ -76,7 +76,7 @@ test('saves and opens images in a portable board file without replacing existing
   await newBoard(page); await page.getByRole('textbox', { name: 'Board name' }).fill('Keep this board'); await page.getByRole('textbox', { name: 'Board name' }).press('Enter');
   await page.getByLabel('Open a board file').setInputFiles({ name: 'import.muze', mimeType: 'application/json', buffer: original.bytes });
   await expect(page.getByRole('textbox', { name: 'Board name' })).toHaveValue(original.board.board.name);
-  await page.reload(); await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeVisible();
+  await page.reload(); await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
   const imported = (await save(page)).board; expect(shapes(imported).map(o => o.id)).toEqual(shapes(original.board).map(o => o.id));
   await page.getByRole('button', { name: 'Main menu', exact: true }).click(); await expect(page.getByRole('menuitem', { name: 'Keep this board', exact: true })).toBeVisible();
 });
@@ -94,7 +94,7 @@ test('pans, zooms, draws a minimap, and exports real PNG and SVG files', async (
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click(); await expect(page.getByRole('button', { name: 'Zoom', exact: true })).not.toHaveText('100%');
   await page.getByRole('button', { name: 'Toggle minimap', exact: true }).click(); await expect(page.getByLabel('Minimap', { exact: true })).toBeVisible();
   for (const format of ['PNG', 'SVG']) {
-    await page.getByRole('button', { name: 'Export', exact: true }).click(); const pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as ' + format, exact: true }).click();
+    await page.getByRole('button', { name: 'Share', exact: true }).click(); const pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as ' + format, exact: true }).click();
     const file = await pending, bytes = await readFile((await file.path())!); expect(file.suggestedFilename()).toMatch(new RegExp('\\.' + format.toLowerCase() + '$'));
     if (format === 'SVG') expect(bytes.toString()).toContain('<svg'); else expect(bytes.subarray(1, 4).toString()).toBe('PNG');
   }
@@ -106,7 +106,7 @@ test('offers the extra drawing tools and a phone layout with reachable controls'
   await page.getByRole('button', { name: 'More tools', exact: true }).click(); await expect(page.getByRole('button', { name: 'Star', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Ellipse', exact: true }).click(); await page.mouse.move(100, 430); await page.mouse.down(); await page.mouse.move(260, 550, { steps: 8 }); await page.mouse.up();
   expect(shapes((await save(page)).board)).toHaveLength(2);
-  for (const label of ['Main menu', 'Select', 'Export']) { const box = (await page.getByRole('button', { name: label, exact: true }).boundingBox())!; expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(393); expect(box.y + box.height).toBeLessThanOrEqual(852); }
+  for (const label of ['Main menu', 'Select', 'Share']) { const box = (await page.getByRole('button', { name: label, exact: true }).boundingBox())!; expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(393); expect(box.y + box.height).toBeLessThanOrEqual(852); }
   await page.screenshot({ path: 'verification/muze-native-mobile.png' });
 });
 
@@ -250,9 +250,9 @@ test('copies labeled drawings between pages and pastes external text after copyi
 test('formats rich text, embeds fonts in SVG, and exports visible pixels in PNG', async ({ page }) => {
   await ready(page); await page.getByRole('button', { name: 'Text', exact: true }).click(); await page.mouse.click(300, 260); await page.keyboard.insertText('An important thought'); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('ControlOrMeta+b'); await page.keyboard.press('Escape');
   await expect(page.locator('.muze-vector-surface text')).toContainText('An important thought');
-  await page.getByRole('button', { name: 'Export', exact: true }).click(); let pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as SVG', exact: true }).click(); let file = await pending;
+  await page.getByRole('button', { name: 'Share', exact: true }).click(); let pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as SVG', exact: true }).click(); let file = await pending;
   const svg = await readFile((await file.path())!, 'utf8'); expect(svg).toContain('data:font/woff2;base64,'); expect(svg).toContain('font-weight: bold');
-  await page.getByRole('button', { name: 'Export', exact: true }).click(); pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as PNG', exact: true }).click(); file = await pending;
+  await page.getByRole('button', { name: 'Share', exact: true }).click(); pending = page.waitForEvent('download'); await page.getByRole('menuitem', { name: 'Export as PNG', exact: true }).click(); file = await pending;
   const png = await readFile((await file.path())!);
   const pixels = await page.evaluate(async source => { const image = new Image(); image.src = source; await image.decode(); const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0); const data = context.getImageData(0, 0, image.width, image.height).data; let visible = 0; for (let i = 3; i < data.length; i += 4) if (data[i] > 100) visible++; return visible; }, 'data:image/png;base64,' + png.toString('base64'));
   expect(pixels).toBeGreaterThan(500);

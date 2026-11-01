@@ -30,6 +30,8 @@ export function saveStorage(db: IDBDatabase, workspace: Workspace): Promise<void
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
+    // The snapshot is complete; start committing without waiting for request events.
+    transaction.commit();
   });
 }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);

@@ -113,6 +113,4 @@
 .muse-chat[hidden]{display:none}
 .muse-applied{display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--muted);margin-top:9px}
 .muse-applied>span{display:flex;align-items:center;gap:5px}
-.muse-tabs.muse-auth{gap:6px}
-.muse-tabs.muse-auth button:last-child{background:var(--blue);color:white}
 @media(prefers-reduced-motion:reduce){.muse-floating,.muse-floating>.muse-avatar,.muse-floating.working .muse-presence{animation:none;transition:none}}

@@ -76,7 +76,7 @@ export async function museFixture(page: Page) {
   };
 }
 export async function exported(page: Page) {
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
   await page.getByRole('menuitem', { name: 'Muse Board file', exact: true }).click();
   const text = await readFile((await (await pending).path())!, 'utf8');

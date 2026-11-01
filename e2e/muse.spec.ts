@@ -16,7 +16,7 @@ test('Clerk exposes Google sign-in and keeps private Muse routes closed to anony
   expect((await request.post('/api/muse/session', { headers: { Origin: origin }, data: {} })).status()).toBe(405);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Edit my Muse', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Sign in to share', exact: true }).click();
   await expect(page.getByRole('button', { name: /Google/ })).toBeVisible();
   await page.screenshot({ path: 'verification/muze-clerk-sign-in.png' });
 });

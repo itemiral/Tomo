@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SignInButton, SignUpButton, UserButton, useUser } from '@clerk/nextjs';
+import { UserButton, useUser } from '@clerk/nextjs';
 import { ArrowLeft, BookOpen, Check, Cloud, FileText, Heart, LockKeyhole, Maximize2, Pencil, RefreshCw, SquarePen, X } from 'lucide-react';
 import { MuseIcon, MuseMarkdown, museRequest as request, RequestError, type MuseProfile } from './shared';
 import { MuseChat } from './chat';
@@ -71,7 +71,7 @@ export function MuseCompanion(props: Props) {
   const { isLoaded, isSignedIn, user } = useUser();
   useEffect(() => { props.onOpenChange(false); }, [user?.id, props.onOpenChange]);
   if (!isLoaded) return null;
-  if (!isSignedIn) return <div data-muse-ui="true" className="muse-interface"><nav className="muse-tabs muse-auth" aria-label="Your account"><SignInButton mode="modal"><button><Cloud size={15}/>Sign in</button></SignInButton><SignUpButton mode="modal"><button>Create account</button></SignUpButton></nav></div>;
+  if (!isSignedIn) return null;
   return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
 
