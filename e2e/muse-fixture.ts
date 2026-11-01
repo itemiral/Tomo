@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { expect, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import {museNameStyles} from '../src/lib/muse-name';
 import type { MuseActions } from '../src/lib/muse-board';
 
 let bundle: Promise<{ js: string; css: string }>;
@@ -29,7 +30,7 @@ export async function museFixture(page: Page) {
   const defaultAvatar='data:image/png;base64,'+(await readFile('public/muse/default-avatar.png')).toString('base64');
   let owner = 'owner-a', turn = 0, icon: string | null = null;
   const boards = new Map<string, {cards: unknown[]; comments: unknown[]; revision: string}>();
-  let generated = false, activated = false;
+  let generated = false, activated = false;const tasks=new Map<string,any>();const names=new Map<string,string>();
   let beforeCanvasSave=async()=>{};
   const canvases = new Map<string, {board:any;revision:string;notes:Record<string,string>}>();
   const notes = new Map<string, { content: string; revision: string; updatedAt: number }>();
@@ -45,14 +46,14 @@ export async function museFixture(page: Page) {
   await page.route('**/api/muse/**', async route => {
     const req = route.request(), url = new URL(req.url()), key = url.pathname.split('/').at(-1)!;
     const ownerAtRequest = owner;
-    if (key === 'session') return route.fulfill({ json: { ownerId: owner, ownerName: owner === 'owner-a' ? 'First owner' : 'Second owner', muse: { id: owner + '-muse', name: 'Muse', iconVersion: icon ? 'test-icon' : null, gazeVersion: activated ? 'gaze-test' : null, candidateVersion: generated ? 'gaze-test' : null } } });
+    if (key === 'session') return route.fulfill({ json: { ownerId: owner, ownerName: owner === 'owner-a' ? 'First owner' : 'Second owner', muse: { id: owner + '-muse', name: names.get(owner)||'Muse', iconVersion: icon ? 'test-icon' : null, gazeVersion: activated ? 'gaze-test' : null, candidateVersion: generated ? 'gaze-test' : null } } });
     if (key === 'canvas') {
       if(!canvases.has(owner)) {
         const documents=['soul','memory'].map((key,i)=>{
           const id=owner+':'+key;if(!notes.has(id))notes.set(id,{content:'# '+key+'\n\nA few things about me.',revision:'initial',updatedAt:Date.now()});
           return {type:'MuzeDocument',id:'muse-file-'+key,markdown:notes.get(id)!.content,documentTitle:key+'.md',text:notes.get(id)!.content,left:220+i*530,top:190+i*80,width:430,boxHeight:360,inset:28,angle:i?2:-2,fontFamily:'IBM Plex Sans',fontSize:20,fill:'#202124',backgroundColor:'#ffffff',strokeWidth:0,verticalAlign:'top'};
         });
-        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muse Board',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
+        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'MuzeText',id:'muse-name',styles:museNameStyles('Muse'),text:'Hello, my name is Muse.',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false},{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muse Board',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
       }
       const current=canvases.get(owner)!;
       if(req.method()==='PUT') {
@@ -63,10 +64,13 @@ export async function museFixture(page: Page) {
           let doc:any;const walk=(objects:any[])=>objects.forEach(o=>{if(o.id==='muse-file-'+key)doc=o;if(o.objects)walk(o.objects)});body.board.pages.forEach((p:any)=>walk(p.objects));
           if(doc){const revision='revision-'+ ++turn;notes.set(owner+':'+key,{content:doc.markdown??doc.text,revision,updatedAt:Date.now()});body.notes[key]=revision;}
         }
+        const nameObject=body.board.pages.flatMap((p:any)=>p.objects).find((o:any)=>o.id==='muse-name');if(nameObject){names.set(owner,nameObject.text.slice(18,-1).trim());body.board.museName=names.get(owner);}
         canvases.set(owner,{...body,revision:'canvas-'+ ++turn});
       }
-      const result=canvases.get(owner)!;return route.fulfill({json:req.method()==='PUT'?{revision:result.revision,notes:result.notes}:result});
+      const result=canvases.get(owner)!;return route.fulfill({json:req.method()==='PUT'?{name:names.get(owner)||'Muse',revision:result.revision,notes:result.notes}:result});
     }
+    if(key==='tasks'){const body=req.method()==='POST'?req.postDataJSON():null,id=owner+':'+(body?.thread||url.searchParams.get('thread'));if(body?.action==='create')tasks.set(id,{id:'task-1',goal:body.goal,status:'paused',cursor:0,attempts:0,steps:[{name:'Plan',status:'pending'},{name:'Compose',status:'pending'}],notes:[],sources:[]});if(body?.action==='cancel'&&tasks.has(id))tasks.get(id).status='cancelled';return route.fulfill({json:{task:tasks.get(id)||null,enabled:false}});}
+    if(key==='image')return route.fulfill({json:{src:defaultAvatar,sourceUrl:'https://example.org/photo.png',sourceTitle:'example.org',retrievedAt:'2026-11-01T00:00:00Z'}});
     if (key === 'board') { if (!boards.has(owner)) boards.set(owner, {cards: [], comments: [], revision: 'initial'}); if(req.method()==='PUT') boards.set(owner, {...req.postDataJSON(), revision: 'rev-'+ ++turn}); return route.fulfill({json: boards.get(owner)}); }
     if (key === 'soul' || key === 'memory') {
       const id = owner + ':' + key;

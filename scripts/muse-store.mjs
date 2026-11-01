@@ -41,7 +41,8 @@ export async function ensureMuse(ownerId) {
     const identity = JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8'));
     if (identity.ownerId !== ownerId || typeof identity.id !== 'string') throw new MuseStoreError(403, 'This Muse belongs to another owner.');
     for (const key of ['soul', 'memory']) await createFile(join(directory, key + '.md'), templates[key]);
-    return { id: identity.id, name: 'Muse' };
+    let name='Muse';try {const board=JSON.parse(await readFile(join(directory,'canvas.json'),'utf8'));if(typeof board.museName==='string')name=board.museName;}catch(e){if(e.code!=='ENOENT')throw e;}
+    return { id: identity.id, name };
   });
 }
 export function validNoteKey(key) {

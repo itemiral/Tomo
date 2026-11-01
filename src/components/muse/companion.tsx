@@ -17,6 +17,7 @@ export function MuseCompanion(props:Props) {
 }
 function OwnedMuse({historyControls,appearanceSelected,appearanceAnchor,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,addToBoard,applyActions,userId}:Props&{userId:string}) {
  const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[iconBusy,setIconBusy]=useState(false),[chatOpen,setChatOpen]=useState(false),[avatarConfirm,setAvatarConfirm]=useState(false),[activity,setActivity]=useState<MuseActivity>({label:''});
+ useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
  const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),workTimers=useRef<ReturnType<typeof setTimeout>[]>([]);
  const stopActivity=useCallback(()=>{workTimers.current.forEach(clearTimeout);workTimers.current=[];setActivity({label:''});},[]);
  const thinking=useCallback((value:boolean)=>{stopActivity();if(value)setActivity({label:'Thinking…'});},[stopActivity]);

@@ -1,3 +1,4 @@
+import {NAME_PREFIX,nameFromText,museNameStyles} from '../src/lib/muse-name.ts';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,9 +22,12 @@ async function initialBoard(owner, notes) {
 }
 async function raw(owner) { try { return await readFile(join(museDirectory(owner),'canvas.json'),'utf8'); } catch(e) { if(e.code==='ENOENT') return null; throw e; } }
 export async function readMuseCanvas(owner) {
-  await ensureMuse(owner);
+  const identity=await ensureMuse(owner);
   const notes = {soul:await readMuseNote(owner,'soul'),memory:await readMuseNote(owner,'memory')};
   const text = await raw(owner), board = text ? JSON.parse(text) : await initialBoard(owner,notes);
+  let nameObject;for(const page of board.pages)walkObjects(page.objects,o=>{if(o.id==='muse-name')nameObject=o;});
+  if(!nameObject){nameObject={type:'MuzeText',id:'muse-name',muzeKind:'muse-name',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false,autoWidth:true,text:NAME_PREFIX+identity.name+'.'};board.pages[0].objects.push(nameObject);}
+  nameObject.editable=false;nameObject.styles=museNameStyles(identity.name);nameObject.fontSize=40;nameObject.width=Math.max(950,nameObject.width||0);board.museName=identity.name;
   const avatar=await readAvatar(owner);
   const preview=avatar?.preview || (await readFile(new URL('../public/muse/default-avatar.png',import.meta.url))).toString('base64');
   let appearance;
@@ -63,8 +67,10 @@ export async function saveMuseCanvas(owner,body) {
   let board;
   try { board=parseBoardFile(JSON.stringify({format:'muze',version:1,board:body.board})); } catch(e) { throw new MuseStoreError(400,e.message); }
   board.id='muse-private';
-  const found={};let count=0,appearances=0;
-  for(const page of board.pages) walkObjects(page.objects,o=>{count++;if(o.id==='muse-appearance')appearances++;for(const key of ['soul','memory']) if(o.id===noteIds[key]) {if(found[key]) throw new MuseStoreError(400,'Keep one original card for each Muse file.');found[key]=o;}});
+  const found={};let count=0,appearances=0,names=0,nameObject;
+  for(const page of board.pages) walkObjects(page.objects,o=>{count++;if(o.id==='muse-name'){names++;nameObject=o;}if(o.id==='muse-appearance')appearances++;for(const key of ['soul','memory']) if(o.id===noteIds[key]) {if(found[key]) throw new MuseStoreError(400,'Keep one original card for each Muse file.');found[key]=o;}});
+  if(names>1)throw new MuseStoreError(400,'Keep one name on this board.');
+  if(nameObject){try{board.museName=nameFromText(nameObject.text);nameObject.text=NAME_PREFIX+board.museName+'.';nameObject.styles=museNameStyles(board.museName);nameObject.editable=false;}catch(e){throw new MuseStoreError(400,e.message);}}else {board.museName=(await ensureMuse(owner)).name;}
   if(appearances!==1) throw new MuseStoreError(400,'Keep one Muse appearance image on this board. Undo its removal or duplication, then use Swap image to change it.');
   if(!found.soul || !found.memory) throw new MuseStoreError(400,'Keep the soul.md and memory.md cards in your notebook. Undo their removal to save.');
   if(count>1000 || describeMuseCanvas(board).length>64000) throw new MuseStoreError(413,'This notebook has more context than Muse can use. Shorten some text or remove a few objects; your draft stays open.');
@@ -80,7 +86,7 @@ export async function saveMuseCanvas(owner,body) {
     for(const key of ['soul','memory']) if(notes[key].content!==(found[key].markdown ?? found[key].text)) notes[key]=await saveMuseNoteUnlocked(owner,key,(found[key].markdown ?? found[key].text),notes[key].revision);
     const path=join(museDirectory(owner),'canvas.json'), temp=path+'.'+randomUUID();
     await writeFile(temp,content,{flag:'wx',mode:0o600});await rename(temp,path);
-    return {revision:digest(content),notes:{soul:notes.soul.revision,memory:notes.memory.revision}};
+    return {name:board.museName,revision:digest(content),notes:{soul:notes.soul.revision,memory:notes.memory.revision}};
   });
 }
 export async function museCanvasContext(owner) { return describeMuseCanvas((await readMuseCanvas(owner)).board); }

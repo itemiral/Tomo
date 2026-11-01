@@ -1,9 +1,22 @@
 {
   "model": "muse-image-1.0",
   "endpoint": "https://api.meta.ai/v1/images/edits",
-  "imagesGenerated": 1,
-  "costUsd": 0.01,
+  "imagesGenerated": 3,
+  "costUsd": 0.03,
   "reference": "https://about.fb.com/wp-content/uploads/2026/09/Introducing-Muse_-Personal-AI-Agent_SocialShare.jpg",
-  "processing": "Uniform crops, deterministic border-connected background removal and bounded color-gain normalization. Atlas references genuine frames [0,4,5,3,4,5,6,7,8]; upward-center uses neutral center because distinct upward poses were not returned. Runtime uses rigid easing, hysteresis and one visible pose at a time, with no stretching or crossfade.",
-  "generatedAt": "2026-11-01T03:48:44.307Z"
+  "processing": "Uniform cell extraction preserving aspect ratio; deterministic border-connected white background removal. No invented or mirrored poses. Twelve clockwise directional cells starting right, neutral, gentle up, gentle down. Several adjacent diagonal poses are visually close; true top and bottom are now present.",
+  "generatedAt": "2026-11-01T03:48:44.307Z",
+  "previousGeneration": {
+    "images": 1,
+    "costUsd": 0.01,
+    "asset": "official-generated-sheet.png"
+  },
+  "activeSheet": "official-generated-15.png",
+  "poseCount": 15,
+  "additionalCandidate": {
+    "asset": "official-corrections-candidate.png",
+    "costUsd": 0.01,
+    "activated": false,
+    "reason": "Distinct diagonals returned, but altered eyelids, head proportions and shadows would introduce visible discontinuities."
+  }
 }

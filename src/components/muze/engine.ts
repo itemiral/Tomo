@@ -1,3 +1,4 @@
+import {museNameStyles} from '@/lib/muse-name';
 import { ActiveSelection, Canvas, Ellipse, FabricImage, FabricObject, Group, IText, Line, PencilBrush, Point, Polygon, Rect, Textbox, Triangle, util, type TPointerEvent, type TMat2D } from 'fabric';
 import { MuzeArrow, MuzeDocument, MuzeNote, MuzeText, MuzeLabel, type Arrowhead } from './objects';
 import { MuzeShape, type Geo } from './shapes';
@@ -322,7 +323,8 @@ export class WhiteboardEngine {
     this.canvas.add(object); this.setTool('select'); this.canvas.setActiveObject(object); this.assignFrames(); this.checkpoint(); this.fit(true);
   }
   applyMuseActions(actions: MuseActions): MuseApplyResult {
-    if (this.closed || this.loading || !this.enabled) return { ids: [], skipped: actions.cards.length + actions.updates.length };
+    if (this.closed || this.loading || !this.enabled) return { ids: [], skipped: actions.cards.length + actions.updates.length+(actions.images?.length||0) };
+    for(const image of actions.images||[])void this.addRemoteImage(image);
     const c = this.canvas, changed: FabricObject[] = [];
     let skipped = 0;
     // Keep any newer text or active edits made while Muse was answering.
@@ -619,6 +621,17 @@ export class WhiteboardEngine {
     };
     element.addEventListener('pointerdown', down, true); window.addEventListener('pointermove', move, { capture: true, passive: false }); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', up, true);
     this.disposers.push(() => { element.removeEventListener('pointerdown', down, true); window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', up, true); });
+  }
+  museNameSelected(){return this.canvas.getActiveObjects().length===1&&this.canvas.getActiveObject()?.id==='muse-name';}
+  renameMuse(name:string){const object=this.canvas.getObjects().find(o=>o.id==='muse-name');if(object instanceof IText){object.set({text:'Hello, my name is '+name+'.',styles:museNameStyles(name)});object.initDimensions();object.setCoords();this.canvas.discardActiveObject();this.checkpoint();}}
+  clearSelection(){this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.emit();}
+  async addRemoteImage(item:NonNullable<MuseActions['images']>[number]) {
+    if(!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(item.src)||item.src.length>16000000)return;
+    const canvas=this.canvas;
+    try{const image=await FabricImage.fromURL(item.src);if(this.closed||this.loading||!this.enabled||canvas.getObjects().some(o=>o.id===item.id))return;
+      const center=this.center(),boxes=canvas.getObjects().map(o=>o.getBoundingRect());
+      image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(b=>b.left+b.width))+48:center.x,top:center.y-160,...{sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt}});image.scale(Math.min(1,420/image.width,320/image.height));canvas.add(image);this.setTool('select');canvas.setActiveObject(image);this.checkpoint();this.fit(true);
+    }catch{this.report('The image could not be placed.');}
   }
   async addImage(file: File) {
     try {

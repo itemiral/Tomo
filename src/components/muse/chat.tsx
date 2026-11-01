@@ -1,5 +1,6 @@
 'use client';
 
+import {MuseTaskPanel} from './task-panel';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Check, FilePlus2, X } from 'lucide-react';
 import { MuseIcon, MuseMarkdown, museRequest, RequestError, type MuseProfile } from './shared';
@@ -41,8 +42,9 @@ export function MuseChat({ expand, beforeSend, profile, thread, boardContext, hi
     } finally { if (mounted.current) { setBusy(false); setPending(''); } }
   }
   return <aside className={"muse-chat" + (hidden ? " collapsed" : "")} aria-label="Chat with Muse" data-muse-ui="true" onKeyDown={event => event.stopPropagation()}>
-    <header hidden={hidden}><div><strong>Muse</strong><span>{busy ? 'Thinking…' : 'Here with you'}</span></div><button aria-label="Close Muse chat" onClick={close}><X size={18}/></button></header>
+    <header hidden={hidden}><div><strong>{profile.muse.name}</strong><span>{busy ? 'Thinking…' : 'Here with you'}</span></div><button aria-label="Close Muse chat" onClick={close}><X size={18}/></button></header>
     <div hidden={hidden} className="muse-chat-messages" aria-live="polite">{!messages.length && !pending && <p className="muse-chat-intro">What would you like to work on?</p>}{messages.map(message => <div className={'muse-message ' + message.role} key={message.id}><MuseMarkdown text={message.content}/>{applied[message.id] ? <div className="muse-applied" role="status">{!!applied[message.id].ids.length && <span><Check size={12}/>Updated your board · Undo available</span>}{!!applied[message.id].skipped && <span>Kept {applied[message.id].skipped} card{applied[message.id].skipped === 1 ? '' : 's'} you changed or locked.</span>}</div> : message.role === 'assistant' && <button className="muse-add-reply" onClick={() => addToBoard(message.content)}><FilePlus2 size={13}/>Add to board</button>}</div>)}{pending && <div className="muse-message user"><MuseMarkdown text={pending}/></div>}{busy && <div className="muse-chat-thinking" role="status"><i/><i/><i/><span>Muse is thinking</span></div>}<div ref={tail}/></div>
+    {!hidden&&<MuseTaskPanel thread={thread} board={boardContext} goal={text} beforeSend={beforeSend} applyActions={applyActions}/>}
     {error && <p className="muse-chat-error" role="alert">{error}</p>}
     <form onSubmit={event => { event.preventDefault(); void send(); }}><textarea ref={input} rows={1} onFocus={expand} aria-label="Message Muse" value={text} maxLength={8000} disabled={busy || !ready} placeholder="A thought, a question…" onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }}/><button aria-label="Send to Muse" disabled={!text.trim() || busy || !ready}><ArrowUp size={17}/></button></form>
   </aside>;
