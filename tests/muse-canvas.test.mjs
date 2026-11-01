@@ -21,7 +21,7 @@ test('Fabric notebook documents write canonical files and preserve canvas drawin
 });
 test('typed context includes groups, document source, comments and geometry, without transmitting image pixels',async()=>{
  const snapshot=await readMuseCanvas('media');snapshot.board.pages[0].objects.push({id:'g',type:'Group',objects:[{id:'doc',type:'MuzeDocument',markdown:'# Remember\nFriday',text:'Remember',documentTitle:'todo.md',left:10,top:20,width:300},{id:'img',type:'Image',src:'data:image/png;base64,PRIVATEPIXELS',width:20,height:20},{id:'path',type:'Path',path:[['M',0,0],['L',10,10]],width:10,height:10}]});snapshot.board.comments.push({id:'comment',author:'You',text:'Weekly review'});
- const context=describeMuseCanvas(snapshot.board);assert.match(context,/Friday/);assert.match(context,/Weekly review/);assert.match(context,/Drawing: geometry only/);assert.match(context,/Local image/);assert.doesNotMatch(context,/PRIVATEPIXELS|data:image/);
+ const context=describeMuseCanvas(snapshot.board);assert.match(context,/Friday/);assert.match(context,/Weekly review/);assert.match(context,/Drawing: geometry only/);assert.match(context,/Private image/);assert.doesNotMatch(context,/PRIVATEPIXELS|data:image/);
 });
 test('file conflicts and deleting canonical document cards reject without overwriting files',async()=>{
  const snapshot=await readMuseCanvas('conflict');const note=await readMuseNote('conflict','memory');await saveMuseNote('conflict','memory','External update',note.revision);

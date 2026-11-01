@@ -53,7 +53,7 @@ export async function museFixture(page: Page) {
           const id=owner+':'+key;if(!notes.has(id))notes.set(id,{content:'# '+key+'\n\nA few things about me.',revision:'initial',updatedAt:Date.now()});
           return {type:'MuzeDocument',id:'muse-file-'+key,markdown:notes.get(id)!.content,documentTitle:key+'.md',text:notes.get(id)!.content,left:220+i*530,top:190+i*80,width:430,boxHeight:360,inset:28,angle:i?2:-2,fontFamily:'IBM Plex Sans',fontSize:20,fill:'#202124',backgroundColor:'#ffffff',strokeWidth:0,verticalAlign:'top'};
         });
-        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'MuzeText',id:'muse-name',styles:museNameStyles('Muse'),text:'Hello, my name is Muse.',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false},{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muse Board',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
+        canvases.set(owner,{board:{id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects:[...documents,{type:'MuzeText',id:'muse-name',styles:museNameStyles('Muse'),text:'Hello, my name is Muse.',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false},{type:'Image',id:'muse-appearance',muzeKind:'muse-appearance',src:defaultAvatar,left:1240,top:300,width:256,height:256}],viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muze',text:'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay in your private notebook—add a caption for what Muse should know.'}]},revision:'initial',notes:{soul:'initial',memory:'initial'}});
       }
       const current=canvases.get(owner)!;
       if(req.method()==='PUT') {
@@ -101,7 +101,7 @@ export async function museFixture(page: Page) {
     return route.fulfill({ status: 404, json: { error: 'Not found' } });
   });
   await page.goto('/__muse-fixture');
-  await expect(page.getByRole('main', { name: 'Muse Board' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
   await expect(page.getByRole('button', { name: 'Open Muse' })).toBeVisible();
   return {
     notes, canvases,
@@ -113,7 +113,7 @@ export async function museFixture(page: Page) {
 export async function exported(page: Page) {
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
-  await page.getByRole('menuitem', { name: 'Muse Board file', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Muze file', exact: true }).click();
   const text = await readFile((await (await pending).path())!, 'utf8');
   const data = JSON.parse(text);
   return { text, objects: data.board.pages.find((page: { id: string }) => page.id === data.board.activePage).objects as { type: string; markdown?:string; id: string; text: string; left: number; top: number; width: number; height: number }[], viewport: data.board.pages[0].viewport as number[] };

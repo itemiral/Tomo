@@ -8,7 +8,7 @@ import { digest } from './muse-local.mjs';
 import { documentColor } from '../src/components/muze/document-color.ts';
 import { parseBoardFile } from '../src/components/muze/storage.ts';
 
-export const MUSE_COMMENT = 'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay local—add a caption for what Muse should know.';
+export const MUSE_COMMENT = 'A little notebook for your Muse. Your words, comments and drawings become context. Pictures stay in your private notebook—add a caption for what Muse should know.';
 const noteIds = { soul: 'muse-file-soul', memory: 'muse-file-memory' };
 export function walkObjects(objects, visit) { for (const o of objects) { visit(o); if (Array.isArray(o.objects)) walkObjects(o.objects, visit); } }
 function fileCard(key, text, x, y, angle) {
@@ -18,7 +18,7 @@ async function initialBoard(owner, notes) {
   const old = await readMuseBoard(owner);
   const objects = [fileCard('soul',notes.soul.content,220,190,-2),fileCard('memory',notes.memory.content,750,270,2)];
   old.cards.forEach((c,i)=>objects.push({...fileCard('memory',c.text,240+(i%2)*500,850+Math.floor(i/2)*320,0),id:c.id,documentTitle:'Memory note.md',width:420,boxHeight:240}));
-  return {id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects,viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muse Board',text:MUSE_COMMENT},...old.comments]};
+  return {id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects,viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muze',text:MUSE_COMMENT},...old.comments]};
 }
 async function raw(owner) { try { return await readFile(join(museDirectory(owner),'canvas.json'),'utf8'); } catch(e) { if(e.code==='ENOENT') return null; throw e; } }
 export async function readMuseCanvas(owner) {
@@ -45,10 +45,10 @@ export function describeMuseCanvas(board) {
       const type=String(o.type), entry={id:String(o.id||''),type,position:{x:o.left||0,y:o.top||0,width:o.width||0,height:o.height||o.boxHeight||0,angle:o.angle||0}};
       const key=Object.keys(noteIds).find(k=>noteIds[k]===o.id);
       if(key) {entry.file=key+'.md';entry.status='Canonical text supplied separately';}
-      else if(typeof o.markdown==='string') entry.markdown=o.markdown.replace(/data:[^\s)]+/g,'[embedded data stays local]');
-      else if(typeof o.text==='string') entry.text=o.text.replace(/data:[^\s)]+/g,'[embedded data stays local]');
+      else if(typeof o.markdown==='string') entry.markdown=o.markdown.replace(/data:[^\s)]+/g,'[embedded data is not sent]');
+      else if(typeof o.text==='string') entry.text=o.text.replace(/data:[^\s)]+/g,'[embedded data is not sent]');
       if(o.id==='muse-appearance') entry.role='Muse appearance reference; swapping uses the avatar upload action';
-      if(type==='Image') entry.status='Local image: pixels not sent or interpreted; any nearby caption is user-provided context';
+      if(type==='Image') entry.status='Private image: pixels not sent or interpreted; any nearby caption is user-provided context';
       else if(type==='Path') {entry.status='Drawing: geometry only, no visual interpretation';entry.stroke=o.stroke;entry.pathSegments=Array.isArray(o.path)?o.path.length:0;}
       else if(type==='Group') entry.status='Group; members listed separately';
       else {entry.shape=o.geo||o.muzeKind||type; if(o.fill)entry.fill=o.fill;if(o.stroke)entry.stroke=o.stroke;}
@@ -59,7 +59,7 @@ export function describeMuseCanvas(board) {
     });
     return {name:page.name,objects};
   });
-  return JSON.stringify({name:board.name,pages,comments:board.comments||[],mediaPolicy:'Images are local-only. Geometry descriptions are not pixel understanding.'});
+  return JSON.stringify({name:board.name,pages,comments:board.comments||[],mediaPolicy:'Image pixels are not included in this context. Geometry descriptions are not pixel understanding.'});
 }
 export async function saveMuseCanvas(owner,body) {
   await ensureMuse(owner);

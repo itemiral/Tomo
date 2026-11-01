@@ -53,6 +53,6 @@ export const authAppearance: ProviderProps['appearance'] = {
 export const authLocalization: ProviderProps['localization'] = {
   socialButtonsBlockButton: 'Sign in with {{provider|titleize}}',
   socialButtonsBlockButtonManyInView: 'Sign in with {{provider|titleize}}',
-  signIn: { start: { title: 'Muse Board', subtitle: 'Sign in to your workspace.' } },
-  signUp: { start: { title: 'Muse Board', subtitle: 'Create your account to get started.' } },
+  signIn: { start: { title: 'Muze', subtitle: 'Sign in to your workspace.' } },
+  signUp: { start: { title: 'Muze', subtitle: 'Create your account to get started.' } },
 };
