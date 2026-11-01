@@ -1,4 +1,4 @@
-import {readFile,writeFile,rename} from 'node:fs/promises';
+import {readFile,writeFile,rename} from './muse-storage.mjs';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ensureMuse,museDirectory,validThread,withMuseOwner,MuseStoreError} from './muse-store.mjs';

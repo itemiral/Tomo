@@ -5,13 +5,15 @@ import { auth, currentUser } from '@clerk/nextjs/server';
 import { ensureMuse, MuseStoreError, readMuseIcon, readMuseNote, saveMuseIcon, saveMuseNote, validNoteKey } from '../../../scripts/muse-store.mjs';
 import { readAvatar, avatarSummary } from '../../../scripts/muse-avatar.mjs';
 import { PrivateError } from './error';
+import { createAuthenticatedClient } from '@/utils/supabase/shared';
+import { StorageError, usesCloudStorage, withMuseStorage } from '../../../scripts/muse-storage.mjs';
 export { PrivateError } from './error';
 export type NoteKey = 'soul' | 'memory';
 type Profile = { ownerId: string };
 const headers = { 'Cache-Control': 'private, no-store, max-age=0', 'Vary': 'Cookie', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin' };
 export function privateJson(data: unknown, status = 200) { return NextResponse.json(data, { status, headers }); }
 export function privateFailure(error: unknown) {
-  const known = error instanceof PrivateError || error instanceof MuseStoreError;
+  const known = error instanceof PrivateError || error instanceof MuseStoreError || error instanceof StorageError;
   return privateJson({ error: known ? error.message : 'Could not open your Muse files. Try again.' }, known ? error.status : 500);
 }
 
@@ -30,6 +32,16 @@ export async function owner(request: NextRequest): Promise<{ profile: Profile }>
   const { userId } = await auth();
   if (!userId) throw new PrivateError(401, 'Sign in to open your Muse.');
   return { profile: { ownerId: userId } };
+}
+
+export async function withOwner<T>(request: NextRequest, operation: (profile: Profile) => Promise<T>): Promise<T> {
+  checkOrigin(request);
+  const { userId, getToken } = await auth();
+  if (!userId) throw new PrivateError(401, 'Sign in to open your Muse.');
+  const profile = { ownerId: userId };
+  if (!usesCloudStorage()) return operation(profile);
+  const client = createAuthenticatedClient(() => getToken());
+  return withMuseStorage(userId, client, () => operation(profile));
 }
 
 export async function jsonBody(request: NextRequest, limit: number): Promise<Record<string, unknown>> {

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile, writeFile, rename, withMuseLease } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureMuse, museDirectory, MuseStoreError } from './muse-store.mjs';
@@ -8,7 +8,7 @@ import { digest } from './muse-local.mjs';
 const locks = new Set();
 async function exclusive(owner, fn) {
   if (locks.has(owner)) throw new MuseStoreError(409, 'Your avatar is being updated. Please wait.');
-  locks.add(owner); try { return await fn(); } finally { locks.delete(owner); }
+  locks.add(owner); try { return await withMuseLease(owner, 'avatar', fn); } finally { locks.delete(owner); }
 }
 export async function readAvatar(owner) {
   await ensureMuse(owner);

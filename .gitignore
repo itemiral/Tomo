@@ -17,3 +17,6 @@ verification/
 
 .muze-private/
 .clerk/
+.vercel/
+supabase/.temp/
+supabase/.branches/

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, stat, writeFile, withStorageTransaction } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { digest, privateDirectory } from './muse-local.mjs';
 
@@ -14,14 +14,14 @@ export class MuseStoreError extends Error {
 }
 export const museDirectory = ownerId => join(privateDirectory, 'muses', digest(ownerId));
 const queues = new Map();
-async function serial(key, operation) {
+async function serial(key, operation, retries = 0) {
   const previous = queues.get(key) || Promise.resolve();
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const pending = previous.then(() => gate);
   queues.set(key, pending);
   await previous;
-  try { return await operation(); }
+  try { return await withStorageTransaction(operation, retries); }
   finally { release(); if (queues.get(key) === pending) queues.delete(key); }
 }
 async function createFile(path, content) {
@@ -43,7 +43,7 @@ export async function ensureMuse(ownerId) {
     for (const key of ['soul', 'memory']) await createFile(join(directory, key + '.md'), templates[key]);
     let name='Muse';try {const board=JSON.parse(await readFile(join(directory,'canvas.json'),'utf8'));if(typeof board.museName==='string')name=board.museName;}catch(e){if(e.code!=='ENOENT')throw e;}
     return { id: identity.id, name };
-  });
+  }, 2);
 }
 export function validNoteKey(key) {
   if (key !== 'soul' && key !== 'memory') throw new MuseStoreError(404, 'That note does not exist.');

@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {readFile,writeFile,rename} from 'node:fs/promises';
+import {readFile,writeFile,rename} from './muse-storage.mjs';
 import {join} from 'node:path';
 import {ensureMuse,museDirectory,withMuseOwner,MuseStoreError} from './muse-store.mjs';
 import {researchGoal,publicUrl} from './muse-research.mjs';

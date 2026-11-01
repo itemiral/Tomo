@@ -10,7 +10,8 @@ export type MuseProfile = { ownerId: string; ownerName: string; muse: { id: stri
 export class RequestError extends Error { constructor(message: string, public status: number) { super(message); } }
 export async function museRequest<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch('/api/muse/' + url, { cache: 'no-store', ...options });
-  const result = await response.json();
+  const result = await response.json().catch(() => null);
+  if (!result) throw new RequestError(response.status === 413 ? 'This file is too large. Use a smaller image or export your draft.' : 'Could not reach Muse. Try again.', response.status);
   if (!response.ok) throw new RequestError(result.error || 'Could not open your Muse. Try again.', response.status);
   return result as T;
 }

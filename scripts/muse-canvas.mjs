@@ -1,5 +1,5 @@
 import {NAME_PREFIX,nameFromText,museNameStyles} from '../src/lib/muse-name.ts';
-import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile, writeFile, rename } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureMuse, museDirectory, readMuseNote, saveMuseNoteUnlocked, readMuseBoard, withMuseOwner, MuseStoreError } from './muse-store.mjs';

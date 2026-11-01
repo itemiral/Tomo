@@ -3,8 +3,8 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { authAppearance, authLocalization } from '@/components/muse/auth-appearance';
 import './globals.css';
 export const metadata: Metadata = {
-  title: 'Muse Board — your whiteboard',
-  description: 'A little room for big ideas. Draw, write, and connect ideas with Muse Board.',
+  title: 'Muze — your whiteboard',
+  description: 'Draw, write, and connect ideas with your Muse.',
   robots: { index: false, follow: false },
   referrer: 'no-referrer',
 };
