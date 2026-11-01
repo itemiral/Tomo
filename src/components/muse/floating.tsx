@@ -7,10 +7,10 @@ import { MuseIcon, type MuseProfile } from './shared';
 type Position = { x: number; y: number };
 export type Obstacle = Position & { id?: string; w: number; h: number };
 export type MuseActivity = { label: string; targetId?: string };
-type Props = { profile?: MuseProfile | null; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
+type Props = { profile?: MuseProfile | null; avatarPending?:boolean; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
 const controls = '.muze-header,.muze-always-styles,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
 
-export function FloatingMuse({ profile, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
+export function FloatingMuse({ profile, avatarPending, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
   const button = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null), editButton = useRef<HTMLButtonElement>(null);
   const [popupOpen, setPopupOpen] = useState(false);
@@ -154,7 +154,7 @@ export function FloatingMuse({ profile, open, changeAvatar, chat, obstacles, act
     }}
     onClick={event => { event.stopPropagation(); if (event.detail === 0 || !moved.current) setPopupOpen(value => !value); moved.current = false; }}>
     <span className="muse-floating-shadow" aria-hidden="true"/>
-    <MuseIcon profile={profile} followCursor/>
+    <MuseIcon profile={profile} followCursor pending={avatarPending}/>
     <span className="muse-floating-name">{profile?.muse.name || 'Muse'}</span>
     {activity.label && <span className="muse-floating-activity" role="status">{activity.label}</span>}
   </button>

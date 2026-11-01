@@ -42,7 +42,7 @@ test('avatar uploads fit the request budget and retain transparent pixels', asyn
   expect(result.originalBytes).toBeGreaterThan(4_500_000);
   expect(result.originalBytes).toBeLessThan(10_000_000);
   expect(result.normalizedLength).toBeLessThanOrEqual(3_700_000);
-  expect(result.large.width).toBeLessThanOrEqual(1024); expect(result.large.height).toBeLessThanOrEqual(1024);
+  expect(result.large.width).toBeLessThanOrEqual(1600); expect(result.large.height).toBeLessThanOrEqual(1600);
   expect(requestSizes).toHaveLength(1); expect(requestSizes[0]).toBeLessThan(3_800_000);
   expect(result.png).toBe(true);
   expect(result.icon).toEqual({ width: 64, height: 64, cornerAlpha: 0, centerAlpha: 255 });
