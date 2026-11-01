@@ -203,7 +203,8 @@
 .muse-avatar-feedback{position:absolute;pointer-events:none;overflow:hidden;border-radius:2px;z-index:12}
 .muse-avatar-blur{position:absolute;inset:0;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);background:#ffffff0a}
 .muse-avatar.pending .muse-portrait,.muse-avatar.pending .muse-orb{filter:blur(5px)}
-.muse-avatar-loading{position:absolute;inset:0;z-index:1;background:var(--panel,#f8f9fa);border-radius:inherit;pointer-events:none}
+.muse-avatar-loading{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;container-type:inline-size;background:var(--panel,#f8f9fa);border-radius:inherit;pointer-events:none}
+.muse-avatar-loading-label{text-align:center;color:var(--muted,#737a84);font:500 clamp(8px,13cqi,11px)/1.35 Inter,sans-serif}
 .muse-avatar-progress{display:block;position:absolute;left:14%;right:14%;bottom:12%;height:4px;overflow:hidden;border-radius:99px;background:#ffffff75;box-shadow:0 0 0 1px #202c3d10,0 1px 5px #202c3d14;pointer-events:none}
 .muse-avatar-progress>i{display:block;width:35%;height:100%;border-radius:inherit;background:#667ca2;animation:muse-avatar-progress 1.8s ease-in-out infinite}
 @keyframes muse-avatar-progress{from{transform:translateX(-110%)}to{transform:translateX(390%)}}
