@@ -5,7 +5,7 @@ type ProviderProps = ComponentProps<typeof ClerkProvider>;
 type AuthTheme = NonNullable<NonNullable<ProviderProps['appearance']>['signIn']>;
 
 const signInAppearance: AuthTheme = {
-  options: { socialButtonsVariant: 'blockButton', logoPlacement: 'none' },
+  options: { socialButtonsVariant: 'blockButton', logoPlacement: 'none', unsafe_disableDevelopmentModeWarnings: true },
   variables: {
     colorPrimary: '#2e70d6', colorForeground: '#202124', colorMutedForeground: '#737a84',
     colorBackground: '#ffffff', colorInput: '#f6f7f8', borderRadius: '7px',
@@ -44,7 +44,7 @@ const signInAppearance: AuthTheme = {
 };
 
 export const authAppearance: ProviderProps['appearance'] = {
-  options: { socialButtonsVariant: 'blockButton' },
+  options: { socialButtonsVariant: 'blockButton', unsafe_disableDevelopmentModeWarnings: true },
   variables: { colorPrimary: '#5277ee', borderRadius: '12px' },
   signIn: signInAppearance,
   signUp: signInAppearance,
