@@ -1,19 +1,24 @@
-import { type NextRequest, NextResponse } from 'next/server';
-import { avatar, checkOrigin, jsonBody, withOwner, privateFailure, privateJson, updateIcon } from '@/server/muse/private';
+import { type NextRequest } from 'next/server';
+import { avatar, avatarImage, checkOrigin, jsonBody, withOwner, privateFailure, privateJson, updateIcon } from '@/server/muse/private';
 import { readAvatar, uploadAvatar, activateAvatar, replaceAvatar, avatarOperation } from '../../../../../scripts/muse-avatar.mjs';
+import { withMuseProfileSnapshot } from '../../../../../scripts/muse-storage.mjs';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 export async function GET(request: NextRequest) {
   try {
     return await withOwner(request, async profile => {
-    const operation=request.nextUrl.searchParams.get('operation');if(operation)return privateJson(await avatarOperation(profile.ownerId,operation));
-    const saved = await readAvatar(profile.ownerId);
-    if (!saved) return await avatar(profile);
-    const sheet = request.nextUrl.searchParams.get('sheet') === 'true';
-    const bytes = sheet ? (request.nextUrl.searchParams.get('v') === saved.activeVersion ? saved.activeSheet : saved.candidate) : saved.preview;
-    if (!bytes) return privateJson({ error: 'No generated preview yet.' }, 404);
-    return new NextResponse(Buffer.from(bytes, 'base64'), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin' } });
+      const operation = request.nextUrl.searchParams.get('operation');
+      if (operation) return privateJson(await avatarOperation(profile.ownerId, operation));
+      return withMuseProfileSnapshot(async () => {
+        const saved = await readAvatar(profile.ownerId);
+        const portrait = request.nextUrl.searchParams.get('display') === 'portrait';
+        if (!saved) return await avatar(profile, portrait);
+        const sheet = request.nextUrl.searchParams.get('sheet') === 'true';
+        const bytes = sheet ? (request.nextUrl.searchParams.get('v') === saved.activeVersion ? saved.activeSheet : saved.candidate) : saved.preview;
+        if (!bytes) return privateJson({ error: 'No generated preview yet.' }, 404);
+        return await avatarImage(Buffer.from(bytes, 'base64'), sheet, portrait);
+      });
     });
   } catch (error) { return privateFailure(error); }
 }

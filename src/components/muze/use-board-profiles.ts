@@ -12,18 +12,39 @@ export function useBoardProfiles(options:Options){
  const members=[...new Set(options.peerIds)].sort().join('|');
  useEffect(()=>{
   if(!scope)return;
-  let cancelled=false,busy=false,publishPending=false,readPending=false;const abort=new AbortController();
-  const active=()=>!cancelled&&current.current.scope===scope;
-  const refresh=(publish=false)=>{
-   publishPending ||= publish;
-   readPending ||= !publish;
-   if(!active()||busy||document.hidden)return;
-   busy=true;let failed=false;const write=publishPending;publishPending=false;readPending=false;
-   void fetch('/api/boards/'+encodeURIComponent(options.boardId!)+'/participants',{method:write?'POST':'GET',cache:'no-store',signal:abort.signal}).then(async response=>{
-    if(!response.ok){if(response.status===401||response.status===403||response.status===404){if(active()){profiles.current=EMPTY;setView({scope,profiles:EMPTY});}return;}throw new Error('Could not read board participants.');}
-    const value=readBoardProfiles(await response.json(),options.boardId!);if(active()){profiles.current=value;setView({scope,profiles:value});}
-   }).catch(()=>{failed=true;if(active()&&write)publishPending=true;}).finally(()=>{busy=false;if(active()&&(publishPending||readPending)&&!failed&&!document.hidden)refresh();});
+  let cancelled=false,denied=false,reading=false,publishing=false,publishPending=false,readPending=false,publication=0,readRevision=0;const abort=new AbortController();
+  const active=()=>!cancelled&&!denied&&current.current.scope===scope;
+  const url='/api/boards/'+encodeURIComponent(options.boardId!)+'/participants';
+  const apply=(value:BoardProfiles)=>{if(active()){profiles.current=value;setView({scope,profiles:value});}};
+  const responseProfiles=async(response:Response)=>{
+   if(!response.ok){
+    if([401,403,404].includes(response.status)&&active()){profiles.current=EMPTY;setView({scope,profiles:EMPTY});denied=true;abort.abort();}
+    throw new Error('Could not read board participants.');
+   }
+   return readBoardProfiles(await response.json(),options.boardId!);
   };
+  const read=()=>{
+   readPending=true;if(!active()||reading||document.hidden)return;
+   reading=true;readPending=false;const startedAt=publication;let failed=false;
+   void fetch(url,{cache:'no-store',signal:abort.signal}).then(responseProfiles).then(value=>{
+    // A read begun before a successful publish must not restore its old avatar.
+    if(active()&&startedAt===publication){readRevision++;apply(value);}
+   }).catch(()=>{failed=true;}).finally(()=>{reading=false;if(active()&&readPending&&!failed&&!document.hidden)read();});
+  };
+  const publish=()=>{
+   if(!active()||publishing||!publishPending||document.hidden)return;
+   publishing=true;publishPending=false;const startedAt=readRevision;let failed=false;
+   void fetch(url,{method:'POST',cache:'no-store',signal:abort.signal}).then(responseProfiles).then(value=>{
+    publication++;
+    // The publish response may have been delayed behind a newer peer read.
+    // Its own profile is acknowledged, but it must not roll other Muses back.
+    if(readRevision===startedAt)apply(value);
+    else if(value[options.userId!])apply({...profiles.current,[options.userId!]:value[options.userId!]});
+    read();
+   })
+    .catch(()=>{failed=true;if(active())publishPending=true;}).finally(()=>{publishing=false;if(active()&&publishPending&&!failed&&!document.hidden)publish();});
+  };
+  const refresh=(write=false)=>{publishPending ||= write;read();publish();};
   const room={scope,refresh};actions.current=room;profiles.current=EMPTY;setView({scope,profiles:EMPTY});refresh(true);
   const changed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail?.ownerId!==options.userId)return;if(event.type==='muse-name-saved'&&detail.name===profiles.current[options.userId!]?.museName)return;refresh(true);};
   const visible=()=>{if(!document.hidden)refresh();};

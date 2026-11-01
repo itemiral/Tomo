@@ -3,32 +3,38 @@ import {useEffect,useRef} from 'react';
 let pointerTracking=false;
 let lastPointer:{clientX:number;clientY:number}|null=null;
 // Hybrid: genuine generated poses plus rigid, time-smoothed motion. No mesh distortion or dynamic relighting.
-export function MusePortrait({src,sheet=false,poses=9,follow=false,onError}:{src:string;sheet?:boolean;poses?:9|15;follow?:boolean;onError:()=>void}) {
- const canvas=useRef<HTMLCanvasElement>(null),failure=useRef(onError);failure.current=onError;
+export function MusePortrait({src,sheet=false,poses=9,follow=false,onError,onLoad}:{src:string;sheet?:boolean;poses?:9|15;follow?:boolean;onError:()=>void;onLoad?:()=>void}) {
+ const canvas=useRef<HTMLCanvasElement>(null),failure=useRef(onError),loaded=useRef(onLoad);failure.current=onError;loaded.current=onLoad;
  useEffect(()=>{
-  if(!pointerTracking){pointerTracking=true;window.addEventListener('pointermove',event=>{lastPointer={clientX:event.clientX,clientY:event.clientY};},{passive:true});window.addEventListener('blur',()=>{lastPointer=null;});document.documentElement.addEventListener('pointerleave',()=>{lastPointer=null;});}
+  if(!pointerTracking){pointerTracking=true;window.addEventListener('pointermove',event=>{if(event.pointerType!=='touch')lastPointer={clientX:event.clientX,clientY:event.clientY};},{passive:true});window.addEventListener('blur',()=>{lastPointer=null;});document.documentElement.addEventListener('pointerleave',()=>{lastPointer=null;});}
   const element=canvas.current,ctx=element?.getContext('2d');if(!element||!ctx)return;
-  let closed=false,ready=false,frame=0,last=0,x=0,y=0,tx=0,ty=0,col=1,row=1,cell=poses===15?12:4,lastPose=0;
+  element.dataset.portraitReady='false';
+  let closed=false,ready=false,frame=0,started=0,x=0,y=0,fromX=0,fromY=0,tx=0,ty=0,col=1,row=1,cell=poses===15?12:4;
   const frames:HTMLCanvasElement[]=[];
   const media=matchMedia('(prefers-reduced-motion: reduce)'),image=new Image();
   const sector=(value:number,current:number)=>value<-.38?0:value>.38?2:Math.abs(value)<.22?1:current;
-  const draw=(now=0)=>{
-   if(sheet&&poses===15&&now-lastPose>85){
-    const radius=Math.hypot(x,y),angle=(Math.atan2(y*Math.max(180,innerHeight*.3),x*Math.max(180,innerWidth*.3))*180/Math.PI+360)%360;
-    let next=radius<.2?12:radius<.55&&Math.abs(y)>Math.abs(x)*1.6?(y<0?13:14):Math.round(angle/30)%12;
+  const draw=()=>{
+   if(sheet&&poses===15){
+    const radius=Math.hypot(tx,ty),angle=(Math.atan2(ty*Math.max(180,innerHeight*.3),tx*Math.max(180,innerWidth*.3))*180/Math.PI+360)%360;
+    const neutral=radius<(cell===12?.24:.16);
+    let next=neutral?12:radius<.55&&Math.abs(ty)>Math.abs(tx)*1.6?(ty<0?13:14):Math.round(angle/30)%12;
     if(cell<12&&next<12){const distance=Math.abs(((angle-cell*30+540)%360)-180);if(distance<20)next=cell;}
-    if(next!==cell){cell=next;lastPose=now;}
+    cell=next;
    }
-   if(sheet&&poses===9&&now-lastPose>100){const nextCol=sector(x,col),nextRow=sector(y,row);if(nextCol!==col||nextRow!==row){col=nextCol;row=nextRow;lastPose=now;}}
+   if(sheet&&poses===9){col=sector(tx,col);row=sector(ty,row);}
    ctx.clearRect(0,0,256,256);ctx.save();ctx.translate(128+x*1.5,128+y*.8);ctx.rotate(x*.018);ctx.scale(1.045,1.045);
    const index=sheet?(poses===15?cell:row*3+col):0;const texture=frames[index];if(texture)ctx.drawImage(texture,-128,-128,256,256);
    ctx.restore();element.style.setProperty('--motion-x',x.toFixed(4));element.style.setProperty('--motion-y',y.toFixed(4));element.dataset.poseCell=String(poses===15?cell:row*3+col);
   };
-  const tick=(now:number)=>{frame=0;if(closed||!ready)return;if(follow&&lastPointer&&!media.matches&&!document.hidden){const box=element.getBoundingClientRect();tx=Math.max(-1,Math.min(1,(lastPointer.clientX-box.x-box.width/2)/Math.max(180,innerWidth*.3)));ty=Math.max(-1,Math.min(1,(lastPointer.clientY-box.y-box.height/2)/Math.max(180,innerHeight*.3)));}const dt=Math.min(64,last?now-last:16);last=now;const alpha=1-Math.exp(-dt/180);x+=(tx-x)*alpha;y+=(ty-y)*alpha;draw(now);if(Math.abs(tx-x)+Math.abs(ty-y)>.001||(follow&&lastPointer&&!media.matches&&!document.hidden))frame=requestAnimationFrame(tick);else last=0;};
+  const tick=(now:number)=>{frame=0;if(closed||!ready)return;const progress=Math.min(1,Math.max(0,(now-started)/90)),ease=1-Math.pow(1-progress,3);x=fromX+(tx-fromX)*ease;y=fromY+(ty-fromY)*ease;draw();if(progress<1)frame=requestAnimationFrame(tick);};
   const animate=()=>{if(!frame&&ready)frame=requestAnimationFrame(tick);};
-  const neutral=()=>{lastPointer=null;tx=ty=0;animate();};
-  const move=(event:Pick<PointerEvent,'clientX'|'clientY'>)=>{lastPointer={clientX:event.clientX,clientY:event.clientY};if(!follow||media.matches||document.hidden)return;const box=element.getBoundingClientRect();tx=Math.max(-1,Math.min(1,(event.clientX-box.x-box.width/2)/Math.max(180,innerWidth*.3)));ty=Math.max(-1,Math.min(1,(event.clientY-box.y-box.height/2)/Math.max(180,innerHeight*.3)));animate();};
-  const preference=()=>{if(media.matches){tx=ty=x=y=0;col=row=1;cell=poses===15?12:4;cancelAnimationFrame(frame);frame=0;if(ready)draw();}};
+  const target=(nextX:number,nextY:number)=>{if(nextX===tx&&nextY===ty)return;fromX=x;fromY=y;tx=nextX;ty=nextY;started=performance.now();animate();};
+  const center=()=>{cancelAnimationFrame(frame);frame=0;tx=ty=x=y=0;col=row=1;cell=poses===15?12:4;if(ready)draw();};
+  const neutral=()=>{lastPointer=null;center();};
+  const move=(event:Pick<PointerEvent,'clientX'|'clientY'>&{pointerType?:string})=>{if(event.pointerType==='touch')return;lastPointer={clientX:event.clientX,clientY:event.clientY};if(!follow||media.matches||document.hidden)return;const box=element.getBoundingClientRect();target(Math.max(-1,Math.min(1,(event.clientX-box.x-box.width/2)/Math.max(180,innerWidth*.3))),Math.max(-1,Math.min(1,(event.clientY-box.y-box.height/2)/Math.max(180,innerHeight*.3))));};
+  const retarget=()=>{if(lastPointer)move(lastPointer);};
+  const reposition=(event:TransitionEvent)=>{if(event.target instanceof Element&&event.target.contains(element))retarget();};
+  const preference=()=>{if(media.matches)center();else retarget();};
   image.onload=()=>{if(closed)return;
    const columns=sheet?(poses===15?5:3):1,rows=sheet?3:1;
    for(let i=0;i<columns*rows;i++){
@@ -46,9 +52,9 @@ export function MusePortrait({src,sheet=false,poses=9,follow=false,onError}:{src
     const size=Math.min(sw,sh);sx+=(sw-size)/2;sy+=(sh-size)/2;
     target.drawImage(image,sx,sy,size,size,0,0,256,256);frames.push(texture);
    }
-   ready=true;draw();if(lastPointer)move(lastPointer);else if(tx||ty)animate();};image.onerror=()=>{if(!closed)failure.current();};image.src=src;
-  window.addEventListener('pointermove',move,{passive:true});document.documentElement.addEventListener('pointerleave',neutral);window.addEventListener('blur',neutral);document.addEventListener('visibilitychange',neutral);media.addEventListener('change',preference);
-  return()=>{closed=true;cancelAnimationFrame(frame);window.removeEventListener('pointermove',move);document.documentElement.removeEventListener('pointerleave',neutral);window.removeEventListener('blur',neutral);document.removeEventListener('visibilitychange',neutral);media.removeEventListener('change',preference);};
+   ready=true;retarget();fromX=x;fromY=y;started=performance.now();if(tx!==x||ty!==y)animate();draw();element.dataset.portraitReady='true';loaded.current?.();};image.onerror=()=>{if(!closed)failure.current();};image.src=src;
+  window.addEventListener('pointermove',move,{passive:true});window.addEventListener('resize',retarget);window.addEventListener('transitionrun',reposition);window.addEventListener('transitionend',reposition);window.addEventListener('transitioncancel',reposition);document.documentElement.addEventListener('pointerleave',neutral);window.addEventListener('blur',neutral);document.addEventListener('visibilitychange',neutral);media.addEventListener('change',preference);
+  return()=>{closed=true;cancelAnimationFrame(frame);window.removeEventListener('pointermove',move);window.removeEventListener('resize',retarget);window.removeEventListener('transitionrun',reposition);window.removeEventListener('transitionend',reposition);window.removeEventListener('transitioncancel',reposition);document.documentElement.removeEventListener('pointerleave',neutral);window.removeEventListener('blur',neutral);document.removeEventListener('visibilitychange',neutral);media.removeEventListener('change',preference);};
  },[src,sheet,poses,follow]);
- return <canvas ref={canvas} className="muse-portrait" width={256} height={256} data-portrait-source={src} aria-hidden="true"/>;
+ return <canvas ref={canvas} className="muse-portrait" width={256} height={256} data-portrait-source={src} data-portrait-ready="false" aria-hidden="true"/>;
 }

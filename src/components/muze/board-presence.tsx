@@ -1,7 +1,6 @@
 'use client';
 import {useEffect,useState} from 'react';
-import {MuseOrb} from '../muse/orb';
-import {MusePortrait} from '../muse/portrait';
+import {MuseAvatarImage} from '../muse/avatar-image';
 import type {BoardProfile,BoardProfiles} from './board-profiles';
 import '../muse/muse.css';
 import {personColor,screenPoint,uniquePeople,type BoardPerson,type BoardCursor} from './presence-state';
@@ -12,8 +11,7 @@ function ParticipantAvatar({name,src}:{name:string;src?:string|null}){
  return <span className="board-user-avatar" aria-hidden="true">{src&&!failed?<img src={src} alt="" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:name.split(/\s+/).map(part=>[...part][0]).slice(0,2).join('')}</span>;
 }
 function ParticipantMuse({profile}:{profile?:BoardProfile}){
- const [failed,setFailed]=useState(false),src=profile?.museAvatarUrl;useEffect(()=>setFailed(false),[src,profile?.museAvatarVersion]);
- return src&&!failed?<span className="muse-avatar"><MusePortrait src={src} poses={profile.musePoses} sheet={profile.museSheet} follow onError={()=>setFailed(true)}/></span>:<MuseOrb followCursor/>;
+ return <MuseAvatarImage src={profile?.museAvatarUrl||null} poses={profile?.musePoses||9} sheet={profile?.museSheet||false} follow/>;
 }
 export function BoardParticipants({peers,userId,connected,profiles={}}:{peers:BoardPerson[];userId?:string;connected:boolean;profiles?:BoardProfiles}){
   const people=uniquePeople(peers).sort((a,b)=>a.userId===userId?-1:b.userId===userId?1:a.name.localeCompare(b.name));

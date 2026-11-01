@@ -148,7 +148,7 @@ test('Muse status is public metadata only and private notebooks, sign-out, and u
     await expect(bo.getByLabel('People on this board')).toContainText('Ada');
     await ada.getByRole('button', { name: 'Toggle Muse work', exact: true }).click();
     await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toBeVisible();
-    const orb = await bo.getByLabel('Ada’s Muse, working', { exact: true }).locator('.muse-orb').boundingBox();
+    const orb = await bo.getByLabel('Ada’s Muse, working', { exact: true }).locator('.board-peer-muse-icon').boundingBox();
     expect(orb!.width).toBeGreaterThan(30); expect(orb!.height).toBeGreaterThan(30);
     await ada.getByRole('button', { name: 'Change page', exact: true }).click();
     await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toHaveCount(0);

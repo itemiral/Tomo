@@ -9,6 +9,7 @@ const requests = new AsyncLocalStorage();
 const transactions = new AsyncLocalStorage();
 const leases = new AsyncLocalStorage();
 const filename = /^(?:identity\.json|soul\.md|memory\.md|canvas\.json|board\.json|icon\.png|avatar(?:-previous|-operations)?\.json|search-usage\.json|(?:chat|task)-[a-f0-9]{64}\.json)$/;
+const profileFiles = ['identity.json', 'soul.md', 'memory.md', 'canvas.json', 'avatar.json', 'icon.png'];
 
 export class StorageError extends Error {
   constructor(status, message, code) { super(message); this.status = status; this.code = code; }
@@ -96,6 +97,25 @@ export async function withStorageTransaction(operation, retries = 0) {
       if (!['PT409', '40001'].includes(error.code) || attempt >= retries) throw error;
     }
   }
+}
+
+// Short profile reads share one owner-scoped snapshot. The snapshot ends with
+// this operation; generation and later requests must read fresh file versions.
+export async function withMuseProfileSnapshot(operation) {
+  const current = context();
+  if (!current) return operation();
+  return withStorageTransaction(async () => {
+    const transaction = transactions.getStore();
+    const names = profileFiles.filter(name => !transaction.rows.has(name));
+    if (names.length) {
+      const { data, error } = await current.client.from('muse_private_files')
+        .select('name,content,version,updated_at').eq('owner_id', current.ownerId).in('name', names);
+      if (error) throw databaseError(error, 'read_profile');
+      const rows = new Map((data || []).map(value => [value.name, value]));
+      for (const name of names) transaction.rows.set(name, rows.get(name) || { name, content: null, version: null, updated_at: null });
+    }
+    return operation();
+  }, 2);
 }
 
 export async function withMuseLease(ownerId, resource, operation) {

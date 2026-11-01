@@ -7,6 +7,7 @@ import { serverSessionToken } from '@/utils/supabase/session';
 import { checkOrigin, PrivateError, withOwner } from '@/server/muse/private';
 import { ensureMuse, readMuseIcon } from '../../../scripts/muse-store.mjs';
 import { readAvatar } from '../../../scripts/muse-avatar.mjs';
+import { withMuseProfileSnapshot } from '../../../scripts/muse-storage.mjs';
 import { boardId } from './validation';
 import { boardJson } from './api';
 import { clerkAvatarUrl, participantData, profileName, selectedMuseAppearance, sharedMuseImage, type ParticipantRow } from './profile-data';
@@ -39,8 +40,11 @@ export async function publishParticipant(request: NextRequest, id: string) {
     if (owner.ownerId !== ctx.userId) throw new PrivateError(401, 'Sign in to open this board.');
     const { data: previous, error: readError } = await ctx.client.from('shared_board_profiles').select(columns).eq('board_id', ctx.id).eq('user_id', owner.ownerId).maybeSingle();
     if (readError) throw new PrivateError(503, 'Board profiles are unavailable. Try again.');
-    const identity = await ensureMuse(owner.ownerId);
-    const appearance = selectedMuseAppearance(await readAvatar(owner.ownerId), await readMuseIcon(owner.ownerId));
+    const { identity, appearance } = await withMuseProfileSnapshot(async () => {
+      const identity = await ensureMuse(owner.ownerId);
+      const [avatar, icon] = await Promise.all([readAvatar(owner.ownerId), readMuseIcon(owner.ownerId)]);
+      return { identity, appearance: selectedMuseAppearance(avatar, icon) };
+    });
     const fields = { user_id: owner.ownerId, name: profileName(user.firstName || user.username, 'Guest'), avatar_url: clerkAvatarUrl(user.imageUrl), muse_name: profileName(identity.name, 'Muse'), muse_avatar_version: appearance.version, muse_sheet: appearance.bytes ? appearance.sheet : true, muse_poses: appearance.bytes ? 9 : 15 };
     if (!previous || Object.entries(fields).some(([key, value]) => previous[key as keyof typeof previous] !== value)) {
       // Only the selected appearance is copied. Source uploads, unused previews,

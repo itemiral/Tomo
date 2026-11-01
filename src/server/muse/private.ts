@@ -7,11 +7,12 @@ import { readAvatar, avatarSummary } from '../../../scripts/muse-avatar.mjs';
 import { PrivateError } from './error';
 import { createAuthenticatedClient } from '@/utils/supabase/shared';
 import { serverSessionToken } from '@/utils/supabase/session';
-import { StorageError, usesCloudStorage, withMuseStorage } from '../../../scripts/muse-storage.mjs';
+import { StorageError, usesCloudStorage, withMuseStorage, withMuseProfileSnapshot } from '../../../scripts/muse-storage.mjs';
+import { sharedMuseImage } from '@/server/boards/profile-data';
 export { PrivateError } from './error';
 export type NoteKey = 'soul' | 'memory';
 type Profile = { ownerId: string };
-const headers = { 'Cache-Control': 'private, no-store, max-age=0', 'Vary': 'Cookie', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin' };
+const headers = { 'Cache-Control': 'private, no-store, max-age=0', 'Vary': 'Cookie, Authorization', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cross-Origin-Resource-Policy': 'same-origin' };
 export function privateJson(data: unknown, status = 200) { return NextResponse.json(data, { status, headers }); }
 export function privateFailure(error: unknown) {
   const known = error instanceof PrivateError || error instanceof MuseStoreError || error instanceof StorageError;
@@ -67,13 +68,22 @@ export async function jsonBody(request: NextRequest, limit: number): Promise<Rec
 export async function publicProfile(profile: Profile) {
   const user = await currentUser();
   if (!user || user.id !== profile.ownerId) throw new PrivateError(401, 'Sign in to open your Muse.');
-  const identity = await ensureMuse(profile.ownerId), icon = await readMuseIcon(profile.ownerId);
-  return { ownerId: profile.ownerId, ownerName: user.firstName || user.username || 'You', muse: { ...identity, iconVersion: icon?.version || null, ...avatarSummary(await readAvatar(profile.ownerId)) } };
+  const stored = await withMuseProfileSnapshot(async () => {
+    const identity = await ensureMuse(profile.ownerId);
+    const [icon, appearance] = await Promise.all([readMuseIcon(profile.ownerId), readAvatar(profile.ownerId)]);
+    return { ...identity, iconVersion: icon?.version || null, ...avatarSummary(appearance) };
+  });
+  return { ownerId: profile.ownerId, ownerName: user.firstName || user.username || 'You', muse: stored };
 }
-export async function avatar(profile: Profile) {
+export async function avatarImage(bytes: Uint8Array | string, sheet = false, portrait = false) {
+  const original = Buffer.from(bytes);
+  const body = portrait ? Buffer.from((await sharedMuseImage({ bytes: original, sheet, version: null }))!, 'base64') : original;
+  return new NextResponse(body, { headers: { ...headers, 'Content-Type': portrait ? 'image/webp' : 'image/png', 'Content-Length': String(body.length) } });
+}
+export async function avatar(profile: Profile, portrait = false) {
   const icon = await readMuseIcon(profile.ownerId);
   if (!icon) throw new PrivateError(404, 'No icon has been added.');
-  return new NextResponse(icon.bytes, { headers: { ...headers, 'Content-Type': 'image/png', 'Content-Length': String(icon.bytes.length) } });
+  return avatarImage(icon.bytes, false, portrait);
 }
 export const noteKey = (value: string): NoteKey => validNoteKey(value) as NoteKey;
 export const note = (profile: Profile, key: NoteKey) => readMuseNote(profile.ownerId, key);
