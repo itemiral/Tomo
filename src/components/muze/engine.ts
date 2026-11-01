@@ -31,6 +31,7 @@ export class WhiteboardEngine {
   private drawing: FabricObject | null = null;
   private pan: { x: number; y: number } | null = null;
   private erased = false;
+  private pointerBusy = false;
   private space = false;
   private clipboard: FabricObject | null = null;
   private closed = false;
@@ -75,9 +76,12 @@ export class WhiteboardEngine {
     });
     this.resize = new ResizeObserver(() => { if (this.closed) return; c.setDimensions({ width: window.innerWidth, height: window.innerHeight }); c.calcOffset(); this.emit(); });
     this.resize.observe(element.parentElement!.parentElement!);
-    c.on('mouse:down', event => this.down(event.e));
+    c.on('mouse:down', event => {this.pointerBusy=true;this.down(event.e);});
     c.on('mouse:move', event => this.move(event.e));
-    c.on('mouse:up', ({ e }) => this.up(e));
+    c.on('mouse:up', ({ e }) => {this.pointerBusy=false;this.up(e);});
+    const endPointer = () => {this.pointerBusy=false;};
+    window.addEventListener('pointercancel',endPointer);
+    this.disposers.push(()=>window.removeEventListener('pointercancel',endPointer));
     c.on('mouse:wheel', ({ e }) => {
       e.preventDefault(); e.stopPropagation();
       if (e.ctrlKey || e.metaKey) this.zoom(c.getZoom() * Math.pow(.995, e.deltaY), new Point(e.offsetX, e.offsetY));
@@ -149,6 +153,17 @@ export class WhiteboardEngine {
     if (viewport[0] !== drawing.viewport[0]) this.changed({ objects: drawing.objects, viewport });
   }
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
+  canReceiveSharedChanges() { return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !this.editing(); }
+  async applySharedDrawing(drawing: Drawing) {
+    if (!this.canReceiveSharedChanges() || JSON.stringify(this.serialize().objects) === JSON.stringify(drawing.objects)) return;
+    const tool = this.tool, paint = {...this.paint}, viewport = [...this.canvas.viewportTransform], selected = this.canvas.getActiveObjects().map(object => object.id);
+    await this.load({...drawing,viewport});
+    if (this.closed) return;
+    this.paint = paint; this.setTool(tool);
+    const remaining = this.canvas.getObjects().filter(object => selected.includes(object.id));
+    if (remaining.length === 1) this.canvas.setActiveObject(remaining[0]);
+    this.canvas.requestRenderAll(); this.emit();
+  }
   setDark(value: boolean) { this.dark = value; this.syncLabels(); this.canvas.requestRenderAll(); }
   serialize(): Drawing { return { objects: JSON.parse(this.snapshot()).objects, viewport: [...this.canvas.viewportTransform] }; }
   private selectionPaint(): Paint {

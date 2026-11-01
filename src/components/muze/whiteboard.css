@@ -84,6 +84,18 @@
 .muze-page-row button{padding:3px;display:flex}
 .muze-page-row input{background:none;border:0;outline:none;min-width:0;width:100%;padding:5px 0;font-size:12px}
 .muze-export-menu{top:62px;right:12px;width:220px}
+.muze-share-panel{top:62px;right:12px;width:320px;max-width:calc(100vw - 24px);padding:14px;z-index:35}
+.muze-share-panel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;font-size:14px}
+.muze-share-panel header button{display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--ink);cursor:pointer}
+.muze-share-panel p{font-size:12px;line-height:1.5;margin:10px 0;color:var(--muted)}
+.muze-share-panel label{display:block;font-size:11px;color:var(--muted)}
+.muze-share-panel input{display:block;width:100%;margin:6px 0 10px;border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--canvas);color:var(--ink);font-size:12px}
+.muze-share-primary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:36px;border:0;border-radius:8px;background:#3278ef;color:white;font:inherit;font-size:12px;cursor:pointer}
+.muze-share-primary:disabled{opacity:.55;cursor:wait}
+.muze-share-panel small{display:block;font-size:11px;line-height:1.5;color:var(--muted);margin-top:9px}
+.muze-share-links{display:flex;justify-content:space-between;gap:12px;margin:10px 0}
+.muze-share-links button{background:none;border:0;padding:3px 0;color:var(--ink);font:inherit;font-size:11px;cursor:pointer}
+.muze-share-panel [role=alert]{color:#c13d42}
 .muze-more-tools{bottom:124px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:13px;width:280px;animation:none}
 .muze-more-tools>div{display:flex;align-items:center;flex-direction:column;gap:4px}
 .muze-more-tools .muze-button{width:42px;height:37px}
