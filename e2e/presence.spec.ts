@@ -295,5 +295,10 @@ test('presence controls fit the full editor on desktop and mobile', async ({ pag
   const mobilePeople = await page.getByLabel('People on this board').boundingBox(), mobileControls = await page.locator('.muze-header-right').boundingBox();
   expect(mobilePeople!.y).toBeGreaterThan(mobileControls!.y + mobileControls!.height);
   await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const muse = await page.getByRole('button', { name: 'Open Muse', exact: true }).boundingBox();
+    const obstacles = await Promise.all([page.getByLabel('People on this board'), page.locator('.muze-toolbar-dock'), page.locator('.muse-chat-stack')].map(item => item.boundingBox()));
+    return !!muse && obstacles.every(box => box && !(muse.x < box.x + box.width && muse.x + muse.width > box.x && muse.y < box.y + box.height && muse.y + muse.height > box.y));
+  }).toBe(true);
   await page.screenshot({ path: '/tmp/muze-presence-editor-mobile.png' });
 });

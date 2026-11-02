@@ -7,6 +7,7 @@ import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
 import { FONTS, SIZES, loadFonts, pale, svgFonts } from './styles';
 import { download, filename, parseObjects, type Drawing } from './storage';
 import { equalBoardValues } from './shared-merge';
+import { frameCanvasBoxes, usableCanvasArea } from './canvas-framing';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
 type EditableText = IText | Textbox | MuzeText | MuzeLabel | MuzeNote;
@@ -48,6 +49,9 @@ export class WhiteboardEngine {
   private touchPoints = new Map<number, Point>();
   private pinch: { distance: number; zoom: number; world: Point } | null = null;
   private resize: ResizeObserver;
+  private mobile = window.innerWidth <= 700;
+  private opened = false;
+  private frameRequest: number | null = null;
   private disposers: (() => void)[] = [];
   onComment?: (point: {x:number;y:number}) => void;
   onLaser?: (point: { x: number; y: number } | null) => void;
@@ -75,7 +79,13 @@ export class WhiteboardEngine {
       if (!this.exporting && !this.loading && !this.closed) this.onRender?.(c.toSVG({ suppressPreamble: true, width: String(c.width), height: String(c.height) }));
       for (const { object, key, value } of restoredColors.splice(0)) object.set(key, value);
     });
-    this.resize = new ResizeObserver(() => { if (this.closed) return; c.setDimensions({ width: window.innerWidth, height: window.innerHeight }); c.calcOffset(); this.emit(); });
+    this.resize = new ResizeObserver(() => {
+      if (this.closed) return;
+      const mobile = window.innerWidth <= 700, enteringMobile = mobile && !this.mobile;
+      this.mobile = mobile;
+      c.setDimensions({ width: window.innerWidth, height: window.innerHeight }); c.calcOffset(); this.emit();
+      if (enteringMobile && !this.loading) this.scheduleFrame(c.getObjects(), true);
+    });
     this.resize.observe(element.parentElement!.parentElement!);
     c.on('mouse:down', event => {this.pointerBusy=true;this.down(event.e);});
     c.on('mouse:move', event => this.move(event.e));
@@ -152,6 +162,8 @@ export class WhiteboardEngine {
     this.syncLabels(); this.rememberFrames();
     this.history = [this.snapshot()]; this.future = []; this.loading = false; this.setTool('select'); this.canvas.requestRenderAll(); this.emit();
     if (viewport[0] !== drawing.viewport[0]) this.changed({ objects: drawing.objects, viewport });
+    if (!this.opened && this.mobile) this.scheduleFrame(this.canvas.getObjects(), true);
+    this.opened = true;
   }
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
   canReceiveSharedChanges() { return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !this.editing(); }
@@ -350,7 +362,12 @@ export class WhiteboardEngine {
       const object = c.getObjects().find(item => item.id === update.id);
       if (!(object instanceof IText) || object.isLocked || object.isEditing || object.isMoving || object.labelFor || object.text !== update.expectedText) { skipped++; continue; }
       const before = object.getBoundingRect();
-      object.set({ text: update.text, styles: {} }); object.initDimensions(); this.growText(object);
+      const previousLines = object.text.split('\n'), styles: typeof object.styles = {};
+      update.text.split('\n').forEach((line, index) => { if (line === previousLines[index] && object.styles[index]) styles[index] = structuredClone(object.styles[index]); });
+      const heading = object instanceof MuzeNote && object.muzeLeading ? { fontSize: 24, fontWeight: 600, ...object.styles[0]?.[0] } : null;
+      object.set({ text: update.text, styles });
+      if (heading) object.setSelectionStyles(heading, 0, update.text.split('\n')[0].length);
+      object.initDimensions(); this.growText(object);
       const after = object.getBoundingRect();
       if (after.height > before.height + 1 && c.getObjects().some(other => {
         if (other === object || other.labelFor || other.muzeKind === 'frame') return false;
@@ -363,14 +380,14 @@ export class WhiteboardEngine {
       changed.push(object);
     }
     const center = this.center(), boxes = c.getObjects().map(object => object.getBoundingRect());
-    const columns = c.width < 700 ? 1 : 2, width = 320, gap = 44, organic=actions.layout!=='aligned';
+    const columns = c.width <= 700 ? 1 : 2, width = 360, gap = 48, organic=actions.layout!=='aligned';
     const left = boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
     let top = boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;
     for (const card of actions.cards) {
       if (c.getObjects().some(object => object.id === card.id)) continue;
       if (index && index % columns === 0) { top += rowHeight + gap; rowHeight = 0; }
-      const object = new MuzeNote(card.title + '\n\n' + card.body, { id: card.id, left: left + (index % columns) * (width + gap)+(organic?[0,14,-10,8][index%4]:0), top:top+(organic?[0,20,-8,12][index%4]:0), angle:organic&&card.body.length<320?[0,-1.4,1.1,0,.8,-1.2][index%6]:0, width, boxHeight: 210, inset: 22, fontSize: 18, fontFamily: FONTS[1].family, fontWeight: 400, lineHeight: 1.2, textAlign: 'left', verticalAlign: 'top', fill: '#1d1d1d', backgroundColor: ['#f8e9b5', '#dfece5', '#e4e7f5'][index % 3], stroke: '#1d1d1d', strokeWidth: 0, muzeKind: 'note', objectCaching: false });
-      object.setSelectionStyles({ fontWeight: 600 }, 0, card.title.length);
+      const object = new MuzeNote(card.title + '\n\n' + card.body, { id: card.id, left: left + (index % columns) * (width + gap), top, angle:organic&&card.body.length<320?[0,-.65,.5,0,.4,-.5][index%6]:0, width, boxHeight: 240, inset: 26, fontSize: 18, fontFamily: FONTS[1].family, fontWeight: 400, muzeLeading: 1.5, textAlign: 'left', verticalAlign: 'top', fill: '#1d1d1d', backgroundColor: ['#f8e9b5', '#dfece5', '#e4e7f5'][index % 3], stroke: '#1d1d1d', strokeWidth: 0, muzeKind: 'note', objectCaching: false });
+      object.setSelectionStyles({ fontWeight: 600, fontSize: 24 }, 0, card.title.length);
       object.initDimensions(); object.setCoords();
       // Keep rotated bounds clear of both existing work and this batch.
       for(let attempt=0;attempt<100;attempt++){const bounds=object.getBoundingRect();if(!boxes.some(b=>bounds.left<b.left+b.width+16&&bounds.left+bounds.width+16>b.left&&bounds.top<b.top+b.height+16&&bounds.top+bounds.height+16>b.top))break;object.set('top',object.top+24);object.setCoords();}
@@ -379,12 +396,7 @@ export class WhiteboardEngine {
     }
     if (changed.length) {
       this.assignFrames(); this.connectors(); this.checkpoint();
-      const bounds = changed.map(object => object.getBoundingRect());
-      const l = Math.min(...bounds.map(b => b.left)), t = Math.min(...bounds.map(b => b.top)), r = Math.max(...bounds.map(b => b.left + b.width)), b = Math.max(...bounds.map(b => b.top + b.height));
-      const startX = c.width > 1000 ? 510 : 36, endX = c.width > 1000 ? c.width - 240 : c.width - 36;
-      const zoom = Math.max(.55, Math.min(1, (endX - startX) / Math.max(1, r - l), (c.height - 200) / Math.max(1, b - t)));
-      c.setViewportTransform([zoom, 0, 0, zoom, startX + (endX - startX - (r - l) * zoom) / 2 - l * zoom, 110 - t * zoom]);
-      this.publish();
+      this.scheduleFrame(changed, true);
     }
     return { ids: changed.map(object => object.id!), skipped };
   }
@@ -545,11 +557,32 @@ export class WhiteboardEngine {
   fit(selection = false) {
     const objects = selection ? this.canvas.getActiveObjects() : this.canvas.getObjects();
     if (!objects.length) { if (!selection) this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); this.publish(); return; }
-    const boxes = objects.map(o => o.getBoundingRect());
-    const left = Math.min(...boxes.map(b => b.left)), top = Math.min(...boxes.map(b => b.top)), right = Math.max(...boxes.map(b => b.left + b.width)), bottom = Math.max(...boxes.map(b => b.top + b.height));
-    const margin = this.canvas.width < 700 ? 60 : 240;
-    const zoom = clampZoom(Math.min(selection ? MAX_ZOOM : 1, (this.canvas.width - margin) / Math.max(1, right - left), (this.canvas.height - 200) / Math.max(1, bottom - top)));
-    this.canvas.setViewportTransform([zoom, 0, 0, zoom, (this.canvas.width - (this.canvas.width < 700 ? 0 : 140)) / 2 - (left + right) / 2 * zoom, (this.canvas.height - 60) / 2 - (top + bottom) / 2 * zoom]); this.publish();
+    this.frameObjects(objects, false, selection ? MAX_ZOOM : 1);
+  }
+  private frameObjects(objects: FabricObject[], readable: boolean, maxZoom = 1) {
+    const app = this.canvas.upperCanvasEl.closest('.muze-app');
+    const visibleBounds = (selector: string) => [...(app?.querySelectorAll<HTMLElement>(selector) || [])].map(element => element.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
+    const header = visibleBounds('.muze-header'), composer = visibleBounds('.muse-chat-stack'), toolbar = visibleBounds('.muze-toolbar-dock');
+    const area = usableCanvasArea(this.canvas.width, this.canvas.height, {
+      headerBottom: header.length ? Math.max(...header.map(rect => rect.bottom)) : undefined,
+      composerTop: composer.length ? Math.min(...composer.map(rect => rect.top)) : undefined,
+      toolbarTop: toolbar.length ? Math.min(...toolbar.map(rect => rect.top)) : undefined,
+    });
+    const visible = objects.filter(object => !object.labelFor), content = visible.filter(object => object.muzeKind !== 'frame');
+    const viewport = frameCanvasBoxes((readable && content.length ? content : visible).map(object => object.getBoundingRect()), area, readable, maxZoom);
+    if (viewport) { this.canvas.setViewportTransform(viewport); this.publish(); }
+  }
+  private scheduleFrame(objects: FabricObject[], readable: boolean) {
+    if (!objects.length || this.closed) return;
+    if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest);
+    const version = this.loadVersion, viewport = [...this.canvas.viewportTransform];
+    this.frameRequest = requestAnimationFrame(() => {
+      this.frameRequest = requestAnimationFrame(() => {
+        this.frameRequest = null;
+        if (this.closed || this.loading || !this.enabled || this.pointerBusy || this.pan || this.pinch || this.canvas._currentTransform || version !== this.loadVersion || viewport.some((value, index) => value !== this.canvas.viewportTransform[index])) return;
+        this.frameObjects(objects.filter(object => this.canvas.getObjects().includes(object)), readable);
+      });
+    });
   }
   panTo(point: Point) { const v = [...this.canvas.viewportTransform] as TMat2D; v[4] = this.canvas.width / 2 - point.x * v[0]; v[5] = this.canvas.height / 2 - point.y * v[0]; this.canvas.setViewportTransform(v); this.publish(); }
   private normalizeShape(shape: MuzeShape) {
@@ -737,5 +770,5 @@ export class WhiteboardEngine {
       active.set({ left: active.left + (key === 'arrowleft' ? -delta : key === 'arrowright' ? delta : 0), top: active.top + (key === 'arrowup' ? -delta : key === 'arrowdown' ? delta : 0) }); active.setCoords(); this.moveFrame(active); this.syncLabels(); this.connectors(); this.checkpoint();
     }
   }
-  dispose() { this.closed = true; this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
+  dispose() { this.closed = true; if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
 }

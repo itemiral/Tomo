@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClerk, useUser } from '@clerk/nextjs';
 import { ArrowUp } from 'lucide-react';
 import { museRequest as request, RequestError, type MuseProfile } from './shared';
@@ -9,17 +9,18 @@ import { MuseChat } from './chat';
 import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import './muse.css';
-type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(working:boolean)=>void;historyControls?:ReactNode;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
+type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(working:boolean)=>void;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
  useEffect(()=>{if(props.chatRequest>0&&isLoaded&&!isSignedIn)clerk.openSignIn();},[props.chatRequest]);
- if(!isLoaded||!isSignedIn||!user)return <div data-muse-ui="true" className="muse-interface"><FloatingMuse profileLoading={!isLoaded||!!isSignedIn} obstacles={props.obstacles} activity={{label:''}} open={()=>{if(isLoaded)clerk.openSignIn();}}/><div className="muse-chat-stack">{props.historyControls}<form className="muse-inline-guest" onSubmit={e=>{e.preventDefault();if(isLoaded)clerk.openSignIn();}}><input aria-label="Message Muse" placeholder="A thought, a question…" value={guestText} onChange={e=>setGuestText(e.target.value)} onKeyDown={e=>e.stopPropagation()}/><button aria-label="Send to Muse" disabled={!isLoaded}><ArrowUp size={17}/></button></form></div></div>;
+ if(!isLoaded||!isSignedIn||!user)return <div data-muse-ui="true" className="muse-interface"><FloatingMuse profileLoading={!isLoaded||!!isSignedIn} obstacles={props.obstacles} activity={{label:''}} open={()=>{if(isLoaded)clerk.openSignIn();}}/><div className="muse-chat-stack"><form className="muse-inline-guest" onSubmit={e=>{e.preventDefault();if(isLoaded)clerk.openSignIn();}}><input aria-label="Message Muse" placeholder="A thought, a question…" value={guestText} onChange={e=>setGuestText(e.target.value)} onKeyDown={e=>e.stopPropagation()}/><button aria-label="Send to Muse" disabled={!isLoaded}><ArrowUp size={17}/></button></form></div></div>;
  return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
-function OwnedMuse({attachImage,onActivity,historyControls,appearanceSelected,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,applyActions,userId}:Props&{userId:string}) {
+function OwnedMuse({attachImage,onActivity,appearanceSelected,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,applyActions,userId}:Props&{userId:string}) {
  const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[avatarState,setAvatarState]=useState<AvatarState>('idle'),[chatOpen,setChatOpen]=useState(false),[avatarStatus,setAvatarStatus]=useState(''),[retryFile,setRetryFile]=useState<File|null>(null),[activity,setActivity]=useState<MuseActivity>({label:''});
  const iconBusy=avatarState==='pending',appearanceBox=obstacles.find(box=>box.id==='muse-appearance');
+ const workingBox=!open&&activity.targetId?obstacles.find(box=>box.id===activity.targetId):undefined;
  useEffect(()=>{onActivity?.(!open&&!!activity.label);},[onActivity,open,activity.label]);
  useEffect(()=>()=>onActivity?.(false),[onActivity]);
  useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
@@ -85,13 +86,15 @@ function OwnedMuse({attachImage,onActivity,historyControls,appearanceSelected,op
     return result;
   }
 
- return <div data-muse-ui="true" className="muse-interface">
+ return <>
+  {workingBox&&<span className="muse-working-target" data-target-id={activity.targetId} aria-hidden="true" style={{left:workingBox.x-8,top:workingBox.y-8,width:workingBox.w+16,height:workingBox.h+16}}/>}
+  <div data-muse-ui="true" className="muse-interface">
   {!open && <FloatingMuse profile={profile} profileLoading={!profile} avatarPending={iconBusy} open={()=>onOpenChange(true)} changeAvatar={()=>{openAppearance?.();}} chat={()=>setChatOpen(true)} obstacles={obstacles} activity={activity} chatOpen={chatOpen}/>}
-  {profile && <div className="muse-chat-stack">{historyControls}<MuseChat attachImage={attachImage} key={thread} hidden={!chatOpen} expand={()=>setChatOpen(true)} beforeSend={beforeSend} profile={profile} thread={thread} boardContext={boardContext} close={()=>setChatOpen(false)} locked={clear} onThinking={thinking} applyActions={apply}/></div>}
+  {profile && <div className="muse-chat-stack"><MuseChat attachImage={attachImage} key={thread} hidden={!chatOpen} expand={()=>setChatOpen(true)} beforeSend={beforeSend} profile={profile} thread={thread} boardContext={boardContext} close={()=>setChatOpen(false)} locked={clear} onThinking={thinking} applyActions={apply}/></div>}
   {open&&profile&&appearanceBox&&<AvatarFeedback box={appearanceBox} state={avatarState} selected={!!appearanceSelected} canRetry={!!retryFile} choose={()=>iconInput.current?.click()} retry={()=>{if(retryFile)void changeIcon(retryFile,true);else iconInput.current?.click();}}/>}
   <span className="muse-sr-only" id="avatar-replace-disclosure">Meta processes this image to generate and apply your avatar.</span>
   <span className="muse-sr-only" role="status" aria-live="polite">{avatarStatus}</span>
   <input type="file" ref={iconInput} hidden accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Choose Muse icon" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void changeIcon(file);}}/>
   {error&&<div className="muze-toast" role="alert">{error}</div>}
- </div>;
+ </div></>;
 }

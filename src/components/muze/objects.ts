@@ -10,16 +10,16 @@ declare module 'fabric' {
     muzeDash?: string; muzeFill?: string; labelFor?: string; autoWidth?: boolean;
     boxHeight?: number; inset?: number; verticalAlign?: 'top' | 'middle' | 'bottom';
     frameId?: string; isLocked?: boolean; bend?: number; arrowStart?: Arrowhead; arrowEnd?: Arrowhead;
-    fontFamily?: string; fontSize?: number; textAlign?: string;
+    fontFamily?: string; fontSize?: number; textAlign?: string; muzeLeading?: number;
   }
   interface SerializedObjectProps {
     markdown?: string; documentTitle?: string; id?: string; muzeKind?: string; startBinding?: string; endBinding?: string;
     muzeDash?: string; muzeFill?: string; labelFor?: string; autoWidth?: boolean;
-    boxHeight?: number; inset?: number; verticalAlign?: 'top' | 'middle' | 'bottom';
+    boxHeight?: number; inset?: number; verticalAlign?: 'top' | 'middle' | 'bottom'; muzeLeading?: number;
     frameId?: string; isLocked?: boolean; bend?: number; arrowStart?: Arrowhead; arrowEnd?: Arrowhead;
   }
 }
-FabricObject.customProperties = ['imageUrl','attribution','sourceUrl','sourceTitle','retrievedAt','markdown', 'documentTitle', 'id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign'];
+FabricObject.customProperties = ['imageUrl','attribution','sourceUrl','sourceTitle','retrievedAt','markdown', 'documentTitle', 'id', 'muzeKind', 'startBinding', 'endBinding', 'muzeDash', 'muzeFill', 'labelFor', 'autoWidth', 'boxHeight', 'inset', 'verticalAlign', 'frameId', 'isLocked', 'bend', 'arrowStart', 'arrowEnd', 'fontFamily', 'fontSize', 'textAlign', 'muzeLeading'];
 Object.assign(FabricObject.ownDefaults, { originX: 'left', originY: 'top', transparentCorners: false, cornerColor: '#ffffff', cornerStrokeColor: '#3278ef', borderColor: '#3278ef', cornerSize: 8, touchCornerSize: 24, padding: 0, borderScaleFactor: 1, strokeUniform: true });
 
 let measuringContext: CanvasRenderingContext2D | null = null;
@@ -52,7 +52,8 @@ function measureLine(text: Textbox, index: number, result: ReturnType<Textbox['_
 }
 
 function setTextMetrics(text: Textbox) {
-  const line = Math.round(text.fontSize * 1.35);
+  const leading = typeof text.muzeLeading === 'number' && text.muzeLeading >= 1 && text.muzeLeading <= 2 ? text.muzeLeading : 1.35;
+  const line = Math.round(text.fontSize * leading);
   const context = measuringContext ||= document.createElement('canvas').getContext('2d')!;
   context.font = `${text.fontStyle || 'normal'} ${text.fontWeight || 400} ${text.fontSize}px "${text.fontFamily}"`;
   const metrics = context.measureText('Mg');

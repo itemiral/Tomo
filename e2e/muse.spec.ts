@@ -136,6 +136,8 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
   expect(updated.objects).toHaveLength(3);
   expect(updated.objects.find(object => object.id === first.id)?.text).toBe('My newer edit');
   expect(updated.objects.find(object => object.id === second.id)?.text).toContain('Updated resources');
+  const heading = { muzeLeading: 1.5, styles: expect.arrayContaining([expect.objectContaining({ start: 0, style: expect.objectContaining({ fontSize: 24, fontWeight: 600 }) })]) };
+  expect(updated.objects.find(object => object.id === second.id)).toMatchObject(heading);
   await expectDirectChat();
   await page.reload(); await chat(page);
   await expect(page.locator('.muse-message.assistant')).toHaveCount(2);
@@ -144,6 +146,7 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
   expect(restored.objects).toHaveLength(3);
   expect(restored.objects.find(object => object.id === first.id)?.text).toBe('My newer edit');
   expect(restored.objects.find(object => object.id === second.id)?.text).toContain('Updated resources');
+  expect(restored.objects.find(object => object.id === second.id)).toMatchObject(heading);
 });
 
 test('custom icons and the private editor work on a narrow screen', async ({ page }) => {
@@ -325,13 +328,14 @@ test('document name colors survive rename, editing and reload on both boards',as
  }
 });
 
-test('composer centers typed text, grows for multiline, and keeps history above it',async({page})=>{
+test('composer stays aligned with the drawing toolbar and grows for multiline text',async({page})=>{
  await museFixture(page);await page.getByRole('button',{name:'Rectangle',exact:true}).click();await page.mouse.move(300,300);await page.mouse.down();await page.mouse.move(400,400);await page.mouse.up();
  for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
   await page.setViewportSize(viewport);const input=page.getByRole('textbox',{name:'Message Muse'});await input.fill('A single line');
   const metrics=await input.evaluate(el=>{const s=getComputedStyle(el);return {height:el.getBoundingClientRect().height,line:parseFloat(s.lineHeight),top:parseFloat(s.paddingTop),bottom:parseFloat(s.paddingBottom)};});expect(metrics.top).toBe(metrics.bottom);expect(metrics.height).toBeCloseTo(metrics.line+metrics.top+metrics.bottom,0);
-  expect(await page.locator('.muse-chat form svg').count()).toBe(1);await expect(page.locator('.muse-presence')).toHaveCount(0);
-  const history=(await page.locator('.muse-history-controls').boundingBox())!,box=(await page.locator('.muse-chat').boundingBox())!;expect(history.y+history.height).toBeLessThan(box.y);
+  await expect(page.getByRole('button',{name:'Attach image',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Send to Muse',exact:true})).toBeVisible();await expect(page.locator('.muse-history-controls')).toHaveCount(0);
+  const toolbar=page.getByRole('toolbar',{name:'Whiteboard tools',exact:true});await expect(toolbar.getByRole('button',{name:'Undo',exact:true})).toBeEnabled();await expect(toolbar.getByRole('button',{name:'Redo',exact:true})).toBeVisible();
+  const dock=(await page.locator('.muze-toolbar-dock').boundingBox())!,box=(await page.locator('.muse-chat').boundingBox())!;expect(Math.abs(box.width-dock.width)).toBeLessThan(2);expect(Math.abs(box.x-dock.x)).toBeLessThan(2);expect(box.y+box.height).toBeLessThanOrEqual(dock.y);expect(dock.x).toBeGreaterThanOrEqual(0);expect(dock.x+dock.width).toBeLessThanOrEqual(viewport.width);
   await input.fill('Line one\nLine two\nLine three');const larger=(await input.boundingBox())!;expect(larger.height).toBeGreaterThan(metrics.height);expect(larger.height).toBeLessThanOrEqual(126);
   await page.screenshot({path:'verification/composer-'+viewport.width+'.png'});
  }
@@ -344,7 +348,7 @@ test('More stays anchored and preserves document drafts with keyboard and narrow
   await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
   const doc=(await exported(page)).objects.find(o=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'))!,bounds=(await page.locator('.muze-vector-surface [id="'+doc.id+'"]').boundingBox())!;await page.mouse.dblclick(bounds.x+60,bounds.y+70);await page.locator('textarea[data-fabric="textarea"]').fill('Draft stays here');
   const more=page.getByRole('button',{name:'More tools',exact:true});await more.click();const panel=page.getByRole('toolbar',{name:'More drawing tools'});await expect(panel).toBeVisible();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('button').nth(2)).toBeFocused();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(more).toBeFocused();expect((await exported(page)).text).toContain('Draft stays here');
-  await page.setViewportSize({width:390,height:844});await page.getByRole('textbox',{name:'Message Muse'}).fill('A thought while choosing tools');await more.click();const p=(await panel.boundingBox())!,chat=(await page.locator('.muse-chat-stack').boundingBox())!;expect(p.x).toBeGreaterThanOrEqual(0);expect(p.x+p.width).toBeLessThanOrEqual(390);expect(p.y).toBeGreaterThanOrEqual(70);expect(chat.y+chat.height).toBeLessThan(p.y);await page.screenshot({path:'verification/more-'+(special?'muse':'ordinary')+'-mobile.png'});
+  await page.setViewportSize({width:390,height:844});await page.getByRole('textbox',{name:'Message Muse'}).fill('A thought while choosing tools');await more.click();const p=(await panel.boundingBox())!;expect(p.x).toBeGreaterThanOrEqual(0);expect(p.x+p.width).toBeLessThanOrEqual(390);expect(p.y).toBeGreaterThanOrEqual(70);await expect.poll(async()=>{const panelBox=(await panel.boundingBox())!,chatBox=(await page.locator('.muse-chat-stack').boundingBox())!;return chatBox.y+chatBox.height<panelBox.y;}).toBe(true);await page.screenshot({path:'verification/more-'+(special?'muse':'ordinary')+'-mobile.png'});
   await page.mouse.click(370,100);await expect(panel).toBeHidden();await more.click();await page.getByRole('button',{name:'Comment',exact:true}).click();await expect(panel).toBeHidden();await page.mouse.click(200,300);await expect(page.getByRole('dialog',{name:'Canvas comment'})).toBeVisible();await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});
  }
 });
@@ -353,6 +357,38 @@ test('generated notes use stable organic poses and honor explicit aligned layout
  const fixture=await museFixture(page);await send(page,'Brainstorm a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
  const first=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(first.some((o:{angle:number})=>Math.abs(o.angle)>0)).toBe(true);await page.getByRole('button',{name:'Close Muse chat'}).click();await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await exported(page)).objects).toHaveLength(0);await page.getByRole('button',{name:'Redo',exact:true}).click();const restored=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(restored.map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));await page.reload();expect(JSON.parse((await exported(page)).text).board.pages[0].objects.map((o:any)=>[o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.left,o.top,o.angle]));
  fixture.response(async()=>({cards:[{id:'aligned-a',title:'First',body:'A short note'},{id:'aligned-b',title:'Second',body:'Another short note'}],updates:[]}));await send(page,'Add two notes aligned in a grid');await expect.poll(async()=>JSON.parse((await exported(page)).text).board.pages[0].objects.length).toBe(5);const all=JSON.parse((await exported(page)).text).board.pages[0].objects;for(const o of all.filter((o:any)=>o.id.startsWith('aligned')))expect(o.angle).toBe(0);expect(all.filter((o:any)=>!o.id.startsWith('aligned')).map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));
+});
+
+for(const width of [1440,390])test(`generated notes keep readable hierarchy above the composer at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:900});await museFixture(page);await send(page,'Outline a project');
+ const notes=page.locator('.muze-vector-surface [id^="muse-test-"]');await expect(notes).toHaveCount(3);
+ const snapshot=await exported(page),zoom=snapshot.viewport[0];
+ for(const item of snapshot.objects){
+  const note=item as typeof item & {fontSize:number;muzeLeading:number;styles:{start:number;end:number;style:{fontSize?:number;fontWeight?:number}}[]};
+  expect(note.fontSize).toBe(18);expect(note.muzeLeading).toBeGreaterThanOrEqual(1.4);expect(note.fontSize*zoom).toBeGreaterThanOrEqual(13);
+  expect(note.styles).toEqual(expect.arrayContaining([expect.objectContaining({start:0,style:expect.objectContaining({fontSize:24,fontWeight:600})})]));
+ }
+ const header=(await page.locator('.muze-header').boundingBox())!,composer=(await page.locator('.muse-chat-stack').boundingBox())!;
+ const visible=width>700?await notes.all():[page.locator('.muze-vector-surface [id="muse-test-0"]')];
+ for(const note of visible){const box=(await note.boundingBox())!;expect(box.x).toBeGreaterThanOrEqual(8);expect(box.x+box.width).toBeLessThanOrEqual(width-8);expect(box.y).toBeGreaterThanOrEqual(header.y+header.height);expect(box.y+box.height).toBeLessThanOrEqual(composer.y-8);}
+ if(width<=700)await expect.poll(async()=>{const muse=await page.getByRole('button',{name:'Open Muse',exact:true}).boundingBox(),bounds=await Promise.all([visible[0],page.locator('.muze-toolbar-dock'),page.locator('.muse-chat-stack')].map(item=>item.boundingBox()));return !!muse&&bounds.every(box=>box&&!(muse.x<box.x+box.width&&muse.x+muse.width>box.x&&muse.y<box.y+box.height&&muse.y+muse.height>box.y));}).toBe(true);
+ await page.screenshot({path:`/tmp/muze-clear-notes-${width}.png`});
+});
+
+test('mobile entry frames existing page content once and preserves a deliberate pan',async({page})=>{
+ await museFixture(page);await send(page,'Outline a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await page.setViewportSize({width:390,height:844});
+ const first=page.locator('.muze-vector-surface [id="muse-test-0"]');
+ const openingVisible=async()=>{const box=await first.boundingBox(),composer=await page.locator('.muse-chat-stack').boundingBox();return !!box&&!!composer&&box.x>=8&&box.x+box.width<=(page.viewportSize()!.width-8)&&box.y>=70&&box.y+box.height<composer.y;};
+ await expect.poll(openingVisible).toBe(true);
+ const initial=await exported(page);await page.getByRole('button',{name:'Hand',exact:true}).click();await expect(page.getByRole('button',{name:'Hand',exact:true})).toHaveAttribute('aria-pressed','true');await expect.poll(()=>page.evaluate(()=>document.elementFromPoint(190,300)?.tagName)).toBe('CANVAS');await page.mouse.move(190,300);await page.mouse.down();await page.mouse.move(270,370,{steps:8});await page.mouse.up();
+ const panned=(await exported(page)).viewport;expect(panned[4]-initial.viewport[4]).toBeGreaterThan(60);expect(panned[5]-initial.viewport[5]).toBeGreaterThan(50);
+ await page.getByRole('textbox',{name:'Message Muse',exact:true}).fill('Keep my place while I type');await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await page.setViewportSize({width:400,height:844});expect((await exported(page)).viewport).toEqual(panned);
+ await page.reload();await expect.poll(openingVisible).toBe(true);
+ await page.getByRole('button',{name:'Pages',exact:true}).click();await page.getByRole('menuitem',{name:'New page',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Pages',exact:true})).toContainText('Page 2');
+ await page.getByRole('button',{name:'Pages',exact:true}).click();await page.getByRole('button',{name:'Open Page 1',exact:true}).click();await expect.poll(openingVisible).toBe(true);
 });
 
 test('pending notebook preferences save before leaving and remain available to workspace chat',async({page})=>{
@@ -374,9 +410,16 @@ test('appearance image is labeled, swappable and centered; hybrid portrait respe
  await page.screenshot({path:'verification/muse-avatar-image-label.png'});await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect(page.locator('.muse-floating .muse-portrait')).toBeVisible();await page.mouse.move(1400,100);await expect.poll(()=>page.locator('.muse-floating .muse-portrait').evaluate(el=>parseFloat(el.style.getPropertyValue('--motion-x')))).toBeGreaterThan(.5);await page.screenshot({path:'verification/muse-custom-portrait.png'});
 });
 
-test('selection actions stay beside undo above composer, including expanded tools on mobile',async({page})=>{
+test('selection actions stay attached to the toolbar with reachable history on mobile',async({page})=>{
  await museFixture(page);await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
- for(const width of [1440,390]){await page.setViewportSize({width,height:900});await page.getByRole('textbox',{name:'Message Muse'}).fill('Typing while an item is selected');const row=page.locator('.muse-history-controls');await expect(row.getByRole('button',{name:'Duplicate selected',exact:true})).toBeVisible();const r=(await row.boundingBox())!,c=(await page.locator('.muse-chat-stack .muse-chat').boundingBox())!,toolbar=(await page.locator('.muze-toolbar-dock').boundingBox())!;expect(r.y+r.height).toBeLessThan(c.y);expect(c.y+c.height).toBeLessThan(toolbar.y);await expect(page.locator('.muze-toolbar-dock .muze-quick-actions')).toHaveCount(0);await page.getByRole('button',{name:'More tools',exact:true}).click();await expect(page.getByRole('toolbar',{name:'More drawing tools'})).toBeVisible();await page.mouse.move(width-10,150);await page.waitForTimeout(1100);await page.screenshot({path:'verification/selection-controls-'+width+'.png'});await page.keyboard.press('Escape');}
+ for(const width of [1440,390]){
+  await page.setViewportSize({width,height:900});await page.getByRole('textbox',{name:'Message Muse'}).fill('Typing while an item is selected');
+  const dock=page.locator('.muze-toolbar-dock'),row=dock.getByRole('toolbar',{name:'Selection tools',exact:true}),tools=dock.getByRole('toolbar',{name:'Whiteboard tools',exact:true});
+  await expect(row.getByRole('button',{name:'Duplicate selected',exact:true})).toBeVisible();await expect(tools.getByRole('button',{name:'Undo',exact:true})).toBeEnabled();await expect(tools.getByRole('button',{name:'Redo',exact:true})).toBeVisible();
+  const r=(await row.boundingBox())!,c=(await page.locator('.muse-chat-stack .muse-chat').boundingBox())!,toolbar=(await dock.boundingBox())!,main=(await tools.boundingBox())!;
+  expect(r.y).toBeGreaterThanOrEqual(toolbar.y);expect(r.y+r.height).toBeLessThanOrEqual(main.y+1);expect(c.y+c.height).toBeLessThanOrEqual(toolbar.y);expect(Math.abs(c.width-toolbar.width)).toBeLessThan(2);await expect(page.locator('.muse-history-controls')).toHaveCount(0);
+  await page.getByRole('button',{name:'More tools',exact:true}).click();await expect(page.getByRole('toolbar',{name:'More drawing tools'})).toBeVisible();await page.mouse.move(width-10,150);await page.screenshot({path:'verification/selection-controls-'+width+'.png'});await page.keyboard.press('Escape');
+ }
 });
 
 test('canvas name edits confirm on blur, preserve identity on revert, and persist on rename',async({page})=>{
@@ -425,10 +468,20 @@ test('automatic replacement uses image feedback, preserves the avatar on failure
  await page.getByRole('button',{name:'Retry avatar update'}).click();await expect.poll(()=>calls).toBe(2);await expect(page.getByRole('button',{name:'Retry avatar update'})).toBeVisible();await expect(page.locator('.muse-avatar-feedback')).toHaveText('');
 });
 
-for(const width of [1440,390])test(`color and font stay visible and apply without opening Styles at ${width}px`,async({page})=>{
- await page.setViewportSize({width,height:844});await museFixture(page);const controls=page.getByRole('complementary',{name:'Color and font'});await expect(controls).toBeVisible();await expect(page.getByRole('complementary',{name:'Drawing styles'})).toBeHidden();
- await page.getByRole('button',{name:'Text',exact:true}).click();await page.mouse.click(width===390?75:400,350);await page.keyboard.insertText('Always visible');await page.keyboard.press('Escape');await controls.getByRole('button',{name:'Blue',exact:true}).click();await controls.getByRole('button',{name:'Serif font',exact:true}).click();
- const text=(await exported(page)).objects.find(o=>o.type==='MuzeText');expect(text).toMatchObject({fill:'#4465e9',fontFamily:'IBM Plex Serif'});const bounds=(await controls.boundingBox())!;expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);await page.screenshot({path:`verification/always-visible-styles-${width}.png`});
+for(const width of [1440,390])test(`contextual styles stay editable and preserve color and font at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:844});await museFixture(page);const palette=page.getByRole('complementary',{name:'Drawing styles',exact:true}),controls=page.getByRole('group',{name:'Color and font',exact:true});await expect(palette).toBeHidden();
+ await page.getByRole('button',{name:'Text',exact:true}).click();if(width>700)await expect(palette).toBeVisible();else await expect(palette).toBeHidden();
+ await page.mouse.click(width===390?75:400,350);await page.keyboard.insertText('Editable style');await page.keyboard.press('Escape');
+ if(width<=700){await expect(palette).toBeHidden();await page.getByRole('button',{name:'Styles',exact:true}).click();}
+ await expect(controls).toBeVisible();await controls.getByRole('button',{name:'Blue',exact:true}).click();await controls.getByRole('button',{name:'Serif font',exact:true}).click();
+ const bounds=(await palette.boundingBox())!;expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);await page.screenshot({path:`verification/contextual-styles-${width}.png`});
+ const text=(await exported(page)).objects.find(o=>o.type==='MuzeText');expect(text).toMatchObject({fill:'#4465e9',fontFamily:'IBM Plex Serif'});
+ await page.getByRole('button',{name:'Undo',exact:true}).click();const reverted=(await exported(page)).objects.find(o=>o.id===text!.id) as {fill?:string;fontFamily?:string};expect(reverted.fill).toBe('#4465e9');expect(reverted.fontFamily).not.toBe('IBM Plex Serif');
+ await page.getByRole('button',{name:'Redo',exact:true}).click();expect((await exported(page)).objects.find(o=>o.id===text!.id)).toMatchObject({fill:'#4465e9',fontFamily:'IBM Plex Serif'});
+ await page.reload();await expect(palette).toBeHidden();expect((await exported(page)).objects.find(o=>o.id===text!.id)).toMatchObject({fill:'#4465e9',fontFamily:'IBM Plex Serif'});
+ const rendered=page.locator('.muze-vector-surface [id="'+text!.id+'"]'),box=(await rendered.boundingBox())!;await page.mouse.click(box.x+box.width/2,box.y+box.height/2);
+ if(width>700)await expect(palette).toBeVisible();else {await expect(palette).toBeHidden();await page.getByRole('button',{name:'Styles',exact:true}).click();await expect(palette).toBeVisible();await page.getByRole('button',{name:'Styles',exact:true}).click();}
+ await page.getByRole('button',{name:'Hand',exact:true}).click();await expect(palette).toBeHidden();
 });
 
 test('normal chat inserts image-only actions with attribution and preserves them on reload',async({page})=>{

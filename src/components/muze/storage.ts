@@ -47,6 +47,7 @@ function validTextStyle(style: unknown): boolean {
 }
 function validObject(value: unknown, depth = 0): boolean {
   if (!record(value) || depth > 12 || !allowedTypes.has(String(value.type))) return false;
+  if (value.muzeLeading !== undefined && (typeof value.muzeLeading !== 'number' || !Number.isFinite(value.muzeLeading) || value.muzeLeading < 1 || value.muzeLeading > 2)) return false;
   if (['left', 'top', 'width', 'height', 'scaleX', 'scaleY', 'angle', 'opacity', 'strokeWidth', 'fontSize', 'bend', 'boxHeight', 'inset'].some(key => value[key] !== undefined && (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || Math.abs(value[key] as number) > 1_000_000))) return false;
   if(value.sourceUrl!==undefined){try{if(typeof value.sourceUrl!=='string'||value.sourceUrl.length>2048)return false;const url=new URL(value.sourceUrl);if(url.protocol!=='https:'||url.username||url.password)return false;}catch{return false;}}
   if(value.attribution!==undefined&&(typeof value.attribution!=='string'||value.attribution.length>1100))return false;

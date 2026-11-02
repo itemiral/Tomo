@@ -97,8 +97,8 @@ for (const destination of ['another board', 'another owner'] as const) test(`an 
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('attachment, message and send controls remain on one compact row at 390px', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+for (const width of [1440, 390]) test(`attachment and drawing controls stay compact and aligned at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
   await museFixture(page); await openAttachments(page);
   const attach = page.getByRole('button', { name: 'Attach image', exact: true });
   const message = page.getByRole('textbox', { name: 'Message Muse', exact: true });
@@ -112,10 +112,23 @@ test('attachment, message and send controls remain on one compact row at 390px',
   expect(plus.x).toBeGreaterThanOrEqual(0);
   expect(plus.x + plus.width).toBeLessThanOrEqual(input.x + 1);
   expect(input.x + input.width).toBeLessThanOrEqual(submit.x + 1);
-  expect(submit.x + submit.width).toBeLessThanOrEqual(390);
+  expect(submit.x + submit.width).toBeLessThanOrEqual(width);
   expect(input.width).toBeGreaterThan(150);
   const sharedTop = Math.max(plus.y, input.y, submit.y);
   const sharedBottom = Math.min(plus.y + plus.height, input.y + input.height, submit.y + submit.height);
   expect(sharedBottom - sharedTop).toBeGreaterThan(20);
   expect(Math.max(plus.height, input.height, submit.height)).toBeLessThanOrEqual(50);
+  const dock = page.locator('.muze-toolbar-dock'), tools = page.getByRole('toolbar', { name: 'Whiteboard tools', exact: true });
+  const composerBox = (await page.locator('.muse-chat').boundingBox())!, dockBox = (await dock.boundingBox())!;
+  expect(Math.abs(composerBox.x - dockBox.x)).toBeLessThan(2);
+  expect(Math.abs(composerBox.width - dockBox.width)).toBeLessThan(2);
+  expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(dockBox.y);
+  expect(dockBox.width).toBeLessThanOrEqual(Math.min(440, width - 24));
+  for (const name of ['Undo', 'Redo', 'Select', 'More tools']) {
+    const control = tools.getByRole('button', { name, exact: true }); await expect(control).toBeVisible();
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(dockBox.x); expect(box.x + box.width).toBeLessThanOrEqual(dockBox.x + dockBox.width);
+  }
+  await expect(page.locator('.muse-history-controls')).toHaveCount(0);
+  await page.screenshot({ path: `/tmp/muze-clear-controls-${width}.png` });
 });

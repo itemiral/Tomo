@@ -49,6 +49,7 @@ export function CanvasTooltips() {
     root.addEventListener('focusout', hide);
     root.addEventListener('keydown', key);
     window.addEventListener('blur', hide);
+    root.addEventListener('scroll', hide, true);
     return () => {
       clearTimeout(timer);
       root.removeEventListener('pointerover', over);
@@ -58,6 +59,7 @@ export function CanvasTooltips() {
       root.removeEventListener('focusout', hide);
       root.removeEventListener('keydown', key);
       window.removeEventListener('blur', hide);
+      root.removeEventListener('scroll', hide, true);
     };
   }, []);
 
@@ -71,10 +73,10 @@ export function CanvasTooltips() {
       let left = anchor.left + (anchor.width - box.width) / 2;
       let top = anchor.top - gap - box.height;
       if (tip.anchor.closest('.muze-header')) top = anchor.bottom + gap;
-      else if (tip.anchor.closest('.muze-always-styles,.muze-style-panel')) {
+      else if (tip.anchor.closest('.muze-style-panel')) {
         left = anchor.left - gap - box.width;
         top = anchor.top + (anchor.height - box.height) / 2;
-      } else if (tip.anchor.closest('.muze-toolbar-dock,.muse-history-controls')) {
+      } else if (tip.anchor.closest('.muze-toolbar-dock')) {
         const chat = document.querySelector('.muse-chat-stack')?.getBoundingClientRect();
         if (chat && left < chat.right && left + box.width > chat.left && top + box.height > chat.top) {
           top = chat.top - gap - box.height;

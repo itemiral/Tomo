@@ -8,7 +8,7 @@ type Position = { x: number; y: number };
 export type Obstacle = Position & { id?: string; w: number; h: number };
 export type MuseActivity = { label: string; targetId?: string };
 type Props = { profile?: MuseProfile | null; profileLoading?:boolean; avatarPending?:boolean; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
-const controls = '.muze-header,.muze-always-styles,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
+const controls = '.muze-header,.board-participants,.board-peer-muses,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
 
 export function FloatingMuse({ profile, profileLoading, avatarPending, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
   const button = useRef<HTMLButtonElement>(null);
@@ -23,7 +23,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
     document.addEventListener('keydown', escape, true);
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true); };
   }, [popupOpen]);
-  const [position, setPosition] = useState<Position>(() => ({ x: 24, y: typeof window === 'undefined' ? 400 : Math.max(110, innerHeight - 240) }));
+  const [position, setPosition] = useState<Position>(() => typeof window !== 'undefined' && innerWidth <= 700 ? { x: 80, y: 60 } : { x: 24, y: typeof window === 'undefined' ? 400 : Math.max(110, innerHeight - 240) });
   const [dragging, setDragging] = useState(false), [held, setHeld] = useState(false), [roaming, setRoaming] = useState(false);
   const point = useRef(position), latest = useRef({ obstacles, activity, chatOpen });
   latest.current = { obstacles, activity, chatOpen };
@@ -32,17 +32,21 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
   const nextRoam = useRef(0), step = useRef(0), wasWorking = useRef(false), pendingHome = useRef(false);
   const moveTo = useCallback((p: Position, wander = false) => { point.current = p; setPosition(p); setRoaming(wander); }, []);
   const bounds = useCallback(() => {
-    const w = button.current?.offsetWidth || 92, h = (button.current?.offsetHeight || 116) + 10;
-    const clamp = (p: Position) => ({ x: Math.max(16, Math.min(innerWidth - w - 16, p.x)), y: Math.max(104, Math.min(innerHeight - h - 120, p.y)) });
-    return { w, h, clamp };
+    const compact = innerWidth <= 700;
+    const w = button.current?.offsetWidth || (compact ? 44 : 92), h = (button.current?.offsetHeight || (compact ? 44 : 116)) + (compact ? 0 : 10);
+    const clamp = (p: Position) => ({ x: Math.max(16, Math.min(innerWidth - w - 16, p.x)), y: Math.max(compact ? 60 : 104, Math.min(innerHeight - h - 120, p.y)) });
+    return { w, h, clamp, compact };
   }, []);
   const scene = useCallback(() => {
-    const { w, h, clamp } = bounds();
+    const { w, h, clamp, compact } = bounds();
     const ui = [...document.querySelectorAll(controls)].map(el => el.getBoundingClientRect()).filter(b => b.width && b.height).map(b => ({ x: b.x, y: b.y, w: b.width, h: b.height }));
     const boxes = [...latest.current.obstacles, ...ui];
-    const overlap = (p: Position) => boxes.reduce((sum, b) => sum + Math.max(0, Math.min(p.x + w + 12, b.x + b.w) - Math.max(p.x - 12, b.x)) * Math.max(0, Math.min(p.y + h + 12, b.y + b.h) - Math.max(p.y - 12, b.y)), 0);
+    const padding = compact ? 4 : 12;
+    const overlap = (p: Position) => boxes.reduce((sum, b) => sum + Math.max(0, Math.min(p.x + w + padding, b.x + b.w) - Math.max(p.x - padding, b.x)) * Math.max(0, Math.min(p.y + h + padding, b.y + b.h) - Math.max(p.y - padding, b.y)), 0);
     const spaces = [24, innerWidth * .22, innerWidth * .48, innerWidth * .74, innerWidth - w - 24].flatMap(x => [120, innerHeight * .32, innerHeight * .54, innerHeight - 240].map(y => clamp({ x, y })));
-    return { w, h, clamp, overlap, spaces };
+    const home = clamp(compact ? { x: document.querySelector('.board-participants') ? innerWidth - 134 : 80, y: 60 } : { x: 24, y: innerHeight - 240 });
+    if (compact) spaces.unshift(home, ...[80, innerWidth * .48, innerWidth - 134].map(x => clamp({ x, y: 60 })));
+    return { w, h, clamp, overlap, spaces, home };
   }, [bounds]);
   const freeze = useCallback(() => {
     const box = button.current?.getBoundingClientRect();
@@ -50,10 +54,9 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
   }, [moveTo]);
   const settle = useCallback(() => {
     if (drag.current || hovered.current || focused.current) return;
-    const { w, h, clamp, overlap, spaces } = scene();
+    const { w, h, clamp, overlap, spaces, home } = scene();
     const work = latest.current.activity;
     const target = work.label ? latest.current.obstacles.find(b => b.id === work.targetId) : undefined;
-    const home = clamp({ x: 24, y: innerHeight - 240 });
     const preferred = target ? clamp({ x: target.x - w - 24, y: target.y + 24 }) : work.label ? clamp({ x: innerWidth * .55, y: innerHeight * .4 }) : pendingHome.current ? home : clamp(point.current);
     const nearby = target ? [{ x: target.x - w - 24, y: target.y + 24 }, { x: target.x + target.w + 24, y: target.y + 24 }, { x: target.x, y: target.y - h - 24 }, { x: target.x, y: target.y + target.h + 24 }].map(clamp) : [];
     const score = (p: Position) => overlap(p) * 1000 + Math.hypot(p.x - preferred.x, p.y - preferred.y);
@@ -156,7 +159,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
     <span className="muse-floating-shadow" aria-hidden="true"/>
     <MuseIcon profile={profile} loading={profileLoading} followCursor pending={avatarPending}/>
     <span className="muse-floating-name">{profile?.muse.name || 'Muse'}</span>
-    {activity.label && <span className="muse-floating-activity" role="status">{activity.label}</span>}
+    {activity.label && <span className={activity.targetId ? 'muse-sr-only' : 'muse-floating-activity'} role="status">{activity.label}</span>}
   </button>
   {popupOpen && <div ref={popup} role="dialog" aria-label="Muse" className="muse-character-popup" style={{left:Math.max(12,Math.min(innerWidth-232,position.x+100)),top:Math.max(76,Math.min(innerHeight-230,position.y))}} onKeyDown={event=>event.stopPropagation()}>
     <header><strong>{profile?.muse.name || 'Muse'}</strong><button aria-label="Close Muse popup" onClick={()=>{setPopupOpen(false);button.current?.focus();}}><X size={16}/></button></header>
