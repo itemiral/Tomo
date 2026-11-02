@@ -39,7 +39,7 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
       const focus=JSON.parse(context).selectedIds;
       const requestFocus=Array.isArray(focus)?focus.filter((id:unknown):id is string=>typeof id==='string'):[];
       onThinking(true,requestFocus);expand();
-      const result = await museRequest<{ messages: Message[]; actions: MuseActions; suggestions?:string[] }>('chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread, board: context, message }), signal: abort.signal });
+      const result = await museRequest<{ messages: Message[]; actions: MuseActions; suggestions?:string[]; personalizationUpdated?:boolean }>('chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread, board: context, message }), signal: abort.signal });
       if (mounted.current && !abort.signal.aborted) {
         setMessages(result.messages); onThinking(false);
         if (result.actions.cards.length || result.actions.updates.length || result.actions.images?.length) {
@@ -47,6 +47,7 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
           setApplied(values => ({ ...values, [id]: applied }));
         }
         if(currentSelection.current===JSON.stringify([...requestFocus].sort()))setSuggestions(Array.isArray(result.suggestions)?[...new Set(result.suggestions.filter(value=>typeof value==='string'&&value.trim()&&value.length<=100).map(value=>value.trim()))].slice(0,2):[]);
+        if(result.personalizationUpdated)window.dispatchEvent(new CustomEvent('muse-personalization-updated',{detail:{ownerId:profile.ownerId}}));
       }
     } catch (cause) {
       if (abort.signal.aborted || !mounted.current) return;

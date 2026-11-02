@@ -1,5 +1,5 @@
 import { documentColor } from './document-color';
-import { documentText } from './document-text';
+import { documentEditSource, documentLines, documentText } from './document-text';
 import { classRegistry, Control, FabricObject, Line, Point, Textbox, util, type TPointerEvent, type TMat2D } from 'fabric';
 
 export type Arrowhead = 'none' | 'arrow' | 'triangle' | 'dot' | 'bar';
@@ -122,7 +122,7 @@ export class MuzeDocument extends MuzeNote {
     this.set({text: documentText(this.markdown || '', this.documentTitle), backgroundColor:documentColor(this.documentTitle || 'Document'), styles:{}});
     // The filename is a quiet heading; Markdown remains intact in the source.
     this.styles = {0:Object.fromEntries([...(this.documentTitle || 'Document')].map((_,i)=>[i,{fontSize:14,fontStyle:'italic',fill:'#606975'}]))};
-    const shown=this.text.split('\n'), raw=(this.markdown || '').split('\n');
+    const shown=this.text.split('\n'), raw=documentLines(this.markdown || '');
     raw.forEach((line,index)=>{
       const row=index+2, heading=line.match(/^(#{1,6})\s/);
       if(heading) this.styles[row]=Object.fromEntries([...(shown[row]||'')].map((_,i)=>[i,{fontSize:this.fontSize*(heading[1].length===1?1.25:1.1),fontWeight:600}]));
@@ -131,11 +131,12 @@ export class MuzeDocument extends MuzeNote {
     this.initDimensions(); this.setCoords();
   }
   enterEditing(event?: TPointerEvent) {
-    this.set({text:this.markdown || '',styles:{}});this.initDimensions();
+    this.set({text:documentLines(this.markdown || '').join('\n'),styles:{}});this.initDimensions();
     super.enterEditing(event);return this;
   }
+  syncMarkdown() { this.markdown = documentEditSource(this.markdown || '', this.text); }
   exitEditing() {
-    this.markdown = this.text;
+    if(this.isEditing)this.syncMarkdown();
     super.exitEditing();this.canvas?.requestRenderAll();return this;
   }
 }

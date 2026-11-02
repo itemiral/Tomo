@@ -2,12 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, stat, writeFile, withStorageTransaction } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { digest, privateDirectory } from './muse-local.mjs';
+import { MUSE_NOTE_TEMPLATES } from './muse-defaults.mjs';
 
 export const NOTE_LIMIT = 512_000;
-const templates = {
-  soul: '# Soul\n\n## Who I am\nI’m Muse, your companion inside Muze. I help turn rough ideas into clear plans on a shared whiteboard.\n\n## How I work\n- Start with the goal, then break it into useful steps.\n- Keep related ideas together and the board easy to read.\n- Offer a clear next step when a plan feels stuck.\n- Ask when a preference or constraint is missing.\n\n## My voice\nCalm, curious, and direct. Use plain language and keep explanations concise.\n\n## Make me yours\nEdit this note to choose my role, working style, and the way I communicate.\n',
-  memory: '# Memory\n\n## About you\nAdd the context you want Muse to remember about you.\n\n## Preferences\n- How I like to plan:\n- How much detail I prefer:\n- Things to keep in mind:\n\n## Current focus\nAdd what you’re working on and what a good result looks like.\n\n## Decisions worth keeping\nRecord choices, useful discoveries, and things to revisit.\n',
-};
+const templates = MUSE_NOTE_TEMPLATES;
 
 export class MuseStoreError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -94,14 +92,63 @@ export function validThread(thread) {
   return thread;
 }
 const threadPath = (ownerId, thread) => join(museDirectory(ownerId), 'chat-' + digest(validThread(thread)) + '.json');
-export async function readMuseChat(ownerId, thread) {
+export const chatArchivePath = (ownerId, thread, index) => {
+  if (!Number.isSafeInteger(index) || index < 0) throw new MuseStoreError(400, 'That conversation section does not exist.');
+  return join(museDirectory(ownerId), 'chat-' + digest('archive:' + validThread(thread) + ':' + index) + '.json');
+};
+export async function readMuseConversation(ownerId, thread) {
   await ensureMuse(ownerId);
-  try { return JSON.parse(await readFile(threadPath(ownerId, thread), 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; return []; }
+  let value;
+  try { value = JSON.parse(await readFile(threadPath(ownerId, thread), 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (Array.isArray(value)) return { version: 2, messages: value, archives: [], archiveCount: 0, summary: '' };
+  if (!value) return { version: 2, messages: [], archives: [], archiveCount: 0, summary: '' };
+  if (value.version !== 2 || !Array.isArray(value.messages) || !Array.isArray(value.archives)) throw new MuseStoreError(500, 'This conversation could not be read.');
+  return value;
+}
+export async function readMuseChat(ownerId, thread) {
+  return (await readMuseConversation(ownerId, thread)).messages;
 }
 export async function saveMuseChat(ownerId, thread, messages) {
+  return withMuseOwner(ownerId, () => saveMuseConversationUnlocked(ownerId, thread, messages));
+}
+const archiveTerms = messages => {
+  const counts = new Map();
+  for (const message of messages) for (const term of (message.content.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,31}/gu) || [])) counts.set(term, (counts.get(term) || 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 64).map(([term]) => term);
+};
+// Call under the owner transaction when committing a turn and its private notes.
+export async function saveMuseConversationUnlocked(ownerId, thread, messages, extra = {}) {
   await ensureMuse(ownerId);
-  await replaceFile(threadPath(ownerId, thread), JSON.stringify(messages.slice(-32)));
+  const current = await readMuseConversation(ownerId, thread);
+  const seen = new Set();
+  const previousIds = new Set(current.recentMessageIds || current.messages.map(message => message.id));
+  const additions = messages.filter(message => !previousIds.has(message?.id));
+  const combined = [...current.messages, ...additions].filter(message => {
+    if (!message || typeof message.id !== 'string' || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || seen.has(message.id)) return false;
+    seen.add(message.id); return true;
+  });
+  const overflow = combined.slice(0, Math.max(0, combined.length - 32));
+  const archives = [...current.archives];
+  let archiveCount = current.archiveCount || 0;
+  while (overflow.length) {
+    let index = Math.max(0, archiveCount - 1), chunk = [];
+    if (archiveCount) {
+      try { chunk = JSON.parse(await readFile(chatArchivePath(ownerId, thread, index), 'utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (chunk.length >= 128) { index = archiveCount; chunk = []; }
+    chunk.push(...overflow.splice(0, 128 - chunk.length));
+    await replaceFile(chatArchivePath(ownerId, thread, index), JSON.stringify(chunk));
+    archiveCount = Math.max(archiveCount, index + 1);
+    const descriptor = { index, count: chunk.length, terms: archiveTerms(chunk) };
+    const previous = archives.findIndex(item => item.index === index);
+    if (previous === -1) archives.push(descriptor); else archives[previous] = descriptor;
+  }
+  const recentMessageIds = [...new Set([...previousIds, ...combined.map(message => message.id)])].slice(-512);
+  const result = { ...current, ...extra, version: 2, messages: combined.slice(-32), recentMessageIds, archiveCount, archives: archives.slice(-256) };
+  await replaceFile(threadPath(ownerId, thread), JSON.stringify(result));
+  return result;
 }
 
 export async function readMuseBoard(ownerId) {

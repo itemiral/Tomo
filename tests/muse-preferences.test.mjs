@@ -56,3 +56,76 @@ test('selected context reaches Muse and scoped suggestions stay outside saved ch
   assert.deepEqual(await readMuseChat('selected-context-owner','focused:page'),saved);
  }finally{globalThis.fetch=original;}
 });
+
+test('normal chat learns private style and project facts in one call, then scopes their context',async()=>{
+ const {readMuseNote}=await import('../scripts/muse-store.mjs');
+ const {readMuseLearning}=await import('../scripts/muse-learning.mjs');
+ const original=globalThis.fetch;let captured,calls=0;
+ const owner='adaptive-model-owner', message='I prefer detailed replies. Our workshop budget is $800.';
+ globalThis.fetch=async(_url,options)=>{
+  calls++;captured=JSON.parse(options.body);
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Let’s outline the workshop.',cards:[],updates:[],suggestions:[],personalization:calls===1?{updates:[
+   {key:'detail',target:'soul',scope:'owner',text:'Give detailed replies.',evidence:'I prefer detailed replies',operation:'upsert'},
+   {key:'budget',target:'memory',scope:'board',text:'Workshop budget: $800.',evidence:'Our workshop budget is $800',operation:'upsert'},
+  ],summary:'Plan the workshop within $800.'}:{updates:[],summary:''}})}}]}));
+ };
+ const ask=(who,thread,prompt='Continue the plan')=>askMuse(who,{thread,message:prompt,board:JSON.stringify({board:'Workshop',page:'One',objects:[]})},new AbortController().signal);
+ try{
+  const result=await ask(owner,'workshop:one',message);
+  assert.equal(calls,1);assert.equal(result.personalizationUpdated,true);
+  assert.match((await readMuseNote(owner,'soul')).content,/Give detailed replies/);
+  assert.match((await readMuseNote(owner,'memory')).content,/Workshop budget: \$800/);
+  assert.equal(Object.hasOwn(result,'personalization'),false);
+  await ask(owner,'workshop:two');assert.match(captured.messages[0].content,/Workshop budget: \$800/);assert.match(captured.messages[0].content,/Give detailed replies/);
+  await ask(owner,'unrelated:one');assert.doesNotMatch(captured.messages[0].content,/Workshop budget: \$800/);assert.match(captured.messages[0].content,/Give detailed replies/);
+  await ask('adaptive-other-owner','workshop:one');assert.doesNotMatch(captured.messages[0].content,/Give detailed replies|Workshop budget: \$800/);
+  assert.equal((await readMuseLearning(owner,'workshop:one')).entries.length,2);
+ }finally{globalThis.fetch=original;}
+});
+
+test('a manual Soul edit during generation wins over a stale learned change',async()=>{
+ const {readMuseNote,saveMuseNote}=await import('../scripts/muse-store.mjs');
+ const original=globalThis.fetch,owner='adaptive-stale-owner';
+ globalThis.fetch=async()=>{
+  const current=await readMuseNote(owner,'soul');
+  await saveMuseNote(owner,'soul','# Soul\nMy own new working style.',current.revision);
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Understood.',cards:[],updates:[],personalization:{updates:[{key:'tone',target:'soul',scope:'owner',text:'Be playful.',evidence:'Please be playful',operation:'upsert'}],summary:''}})}}]}));
+ };
+ try{
+  const result=await askMuse(owner,{thread:'draft:one',message:'Please be playful',board:JSON.stringify({board:'Draft',page:'One',objects:[]})},new AbortController().signal);
+  assert.equal((await readMuseNote(owner,'soul')).content,'# Soul\nMy own new working style.');
+  assert.equal(result.personalizationUpdated,false);
+ }finally{globalThis.fetch=original;}
+});
+
+test('cancelled responses do not write learned preferences or conversation messages',async()=>{
+ const {readMuseNote,readMuseChat}=await import('../scripts/muse-store.mjs');
+ const original=globalThis.fetch,owner='adaptive-cancel-owner',controller=new AbortController();
+ globalThis.fetch=async()=>{
+  controller.abort();
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Understood.',cards:[],updates:[],personalization:{updates:[{key:'tone',target:'soul',scope:'owner',text:'Be playful.',evidence:'Please be playful',operation:'upsert'}],summary:''}})}}]}));
+ };
+ try{
+  await assert.rejects(askMuse(owner,{thread:'cancel:one',message:'Please be playful',board:JSON.stringify({board:'Draft',page:'One',objects:[]})},controller.signal),{status:499});
+  assert.doesNotMatch((await readMuseNote(owner,'soul')).content,/Be playful/);
+  assert.deepEqual(await readMuseChat(owner,'cancel:one'),[]);
+ }finally{globalThis.fetch=original;}
+});
+
+test('removing a learned preference also removes its old exchange from model context',async()=>{
+ const {readMuseNote,saveMuseNote,readMuseChat}=await import('../scripts/muse-store.mjs');
+ const original=globalThis.fetch,owner='adaptive-delete-owner';let captured,calls=0;
+ globalThis.fetch=async(_url,options)=>{
+  captured=JSON.parse(options.body);calls++;
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:calls===1?'I can use violet metaphors.':'What should we work on next?',cards:[],updates:[],personalization:{updates:calls===1?[{key:'tone',target:'soul',scope:'owner',text:'Use violet metaphors.',evidence:'Always use violet metaphors',operation:'upsert'}]:[],summary:''}})}}]}));
+ };
+ const ask=message=>askMuse(owner,{thread:'delete:one',message,board:JSON.stringify({board:'Draft',page:'One',objects:[]})},new AbortController().signal);
+ try{
+  await ask('Always use violet metaphors');
+  const soul=await readMuseNote(owner,'soul');
+  await saveMuseNote(owner,'soul',soul.content.replace(/<!-- muze-learned:start -->[\s\S]*?<!-- muze-learned:end -->/,''),soul.revision);
+  await ask('Continue');
+  assert.doesNotMatch(JSON.stringify(captured.messages),/violet metaphors/);
+  assert.match(JSON.stringify(await readMuseChat(owner,'delete:one')),/violet metaphors/,'the private transcript remains separate from active memory');
+ }finally{globalThis.fetch=original;}
+});

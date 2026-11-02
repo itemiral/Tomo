@@ -67,6 +67,18 @@ test('the default avatar endpoint retains the original PNG and owner-only respon
   assert.deepEqual(globalThis.__avatarDisplay.readOwners, ['owner_fixture']);
 });
 
+test('an account switch cannot cache a different owner’s avatar under the requested owner', async () => {
+  fixture();
+  const denied = await GET(request('?sheet=true&v=active&display=portrait', { 'X-Muze-Owner': 'previous-owner' }));
+  assert.equal(denied.status, 403);
+  assert.deepEqual(globalThis.__avatarDisplay.readOwners, []);
+  assert.equal(globalThis.__avatarDisplay.snapshots, 0);
+  privateHeaders(denied);
+  const allowed = await GET(request('?sheet=true&v=active&display=portrait', { 'X-Muze-Owner': 'owner_fixture' }));
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(globalThis.__avatarDisplay.readOwners, ['owner_fixture']);
+});
+
 test('portrait sheets keep all nine poses and transparency in a small 384px WebP', async () => {
   fixture();
   const response = await GET(request('?sheet=true&v=active&display=portrait'));

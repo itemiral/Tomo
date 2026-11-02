@@ -3,6 +3,7 @@
 import { MuseAvatarImage } from './avatar-image';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { musePortraitSource, musePreviewOwnerMatches } from './preview-cache';
 
 export type MuseProfile = { ownerId: string; ownerName: string; muse: { id: string; name: string; iconVersion: string | null; gazeVersion?: string | null; candidateVersion?: string | null } };
 export class RequestError extends Error { constructor(message: string, public status: number) { super(message); } }
@@ -15,8 +16,8 @@ export async function museRequest<T>(url: string, options?: RequestInit): Promis
 }
 export function MuseIcon({ profile, followCursor = false, pending = false, loading = false }: { profile?: MuseProfile | null; followCursor?: boolean; pending?: boolean; loading?: boolean }) {
   const custom=!!profile?.muse.iconVersion,gaze=profile?.muse.gazeVersion;
-  const src=loading?null:custom?'/api/muse/avatar?'+(gaze?'sheet=true&v='+gaze:'v='+profile?.muse.iconVersion)+'&display=portrait':'/muse/default-gaze-15.png?v=hybrid-15';
-  return <MuseAvatarImage src={src} poses={custom?9:15} sheet={!custom||!!gaze} follow={followCursor} pending={pending}/>;
+  const src=loading?null:profile?musePortraitSource(profile):'/muse/default-gaze-15.png?v=hybrid-15';
+  return <MuseAvatarImage src={src} poses={custom?9:15} sheet={!custom||!!gaze} follow={followCursor} pending={pending} cacheOwner={profile&&musePreviewOwnerMatches(profile.ownerId)?profile.ownerId:undefined}/>;
 }
 export function MuseMarkdown({ text }: { text: string }) {
   return <div className="muse-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span className="muse-image-label">{alt || 'Image'}</span>, a: ({ children, href }) => href && /^https?:\/\//i.test(href) ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span> }}>{text}</Markdown></div>;

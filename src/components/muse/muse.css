@@ -190,7 +190,7 @@
 
 .muse-name-editor{font-size:40px;line-height:1.35;padding:0}.muse-rename-confirm{width:min(340px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;font:14px/1.5 Inter;box-shadow:var(--shadow)}.muse-rename-confirm>div{display:flex;justify-content:flex-end;gap:12px}.muse-rename-confirm button{padding:7px 12px;border-radius:8px;background:var(--hover)}.muse-rename-confirm>div button:last-child{background:var(--blue);color:white}
 
-.muse-name-editor input{font-family:'Shantell Sans',Inter,sans-serif;color:#4266a9;text-decoration:underline;text-underline-offset:5px;border-bottom:0}
+.muze-app .muse-name-editor input{font-family:'Shantell Sans',Inter,sans-serif;color:#4266a9;text-decoration:underline;text-underline-offset:5px;border-bottom:0}
 
 
 

@@ -18,7 +18,7 @@ function bundle() {
     const peers=[{userId:'owner-b',name:'Bo',tabId:'b',pageId:'page',muse:'idle'}];
     function Peers(){const{isLoaded,isSignedIn,user}=useUser();const profiles=useBoardProfiles({boardId:'${boardId}',userId:user?.id,enabled:!!(isLoaded&&isSignedIn),connected:true,peerIds:['owner-b']});return <><output data-testid="own-profile-name">{profiles[user?.id]?.museName}</output><BoardPeerMuses profiles={profiles} peers={peers} userId={user?.id} pageId="page"/></>;}
     function Appearances(){const[version,setVersion]=useState('a');useEffect(()=>{const update=event=>setVersion(event.detail);window.addEventListener('loading-appearance',update);return()=>window.removeEventListener('loading-appearance',update)},[]);const profile={ownerId:'owner-a',ownerName:'Owner',muse:{id:'owner-muse',name:'Kumo',iconVersion:'icon-version-'+version,gazeVersion:'sheet-version-'+version}},peer={userId:'owner-b',name:'Bo',avatarUrl:null,museName:'Pip',museAvatarUrl:'/api/boards/${boardId}/participants/owner-b/avatar?v='+version.repeat(64),museAvatarVersion:version.repeat(64),musePoses:9,museSheet:true};return <><div data-testid="owner-appearance" style={{position:'absolute',top:120,left:120,width:64,height:64}}><MuseIcon profile={profile}/></div><BoardPeerMuses profiles={{'owner-b':peer}} peers={peers} userId="owner-a" pageId="page"/></>;}
-    function App(){useEffect(()=>{window.loadingFixtureMounted=true},[]);return <main className="muze-app" aria-label="Loading test canvas">{window.loadingMode==='appearance'?<Appearances/>:window.loadingMode==='peer'?<Peers/>:<MuseCompanion attachImage={async()=>{}} open={false} onOpenChange={()=>{}} chatRequest={0} obstacles={[]} thread="board:page" boardContext="" applyActions={()=>({ids:[],skipped:0})}/>}</main>;}createRoot(document.getElementById('root')).render(<App/>);
+    function App(){useEffect(()=>{window.loadingFixtureMounted=true},[]);return <main className="muze-app" aria-label="Loading test canvas">{window.loadingMode==='appearance'?<Appearances/>:window.loadingMode==='peer'?<Peers/>:<MuseCompanion appearanceChanged={async()=>{if(window.loadingAppearanceFailure)throw new Error("Preview refresh unavailable");}} attachImage={async()=>{}} open={false} onOpenChange={()=>{}} chatRequest={0} obstacles={[]} thread="board:page" boardContext="" applyActions={()=>({ids:[],skipped:0})}/>}</main>;}createRoot(document.getElementById('root')).render(<App/>);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', outdir: '/tmp/muze-loading-fixture', external: ['/fonts/*'], define: { 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'delayed-clerk-fixture', setup(builder) {
       builder.onResolve({ filter: /^@clerk\/nextjs$/ }, () => ({ path: 'auth', namespace: 'fixture' }));
@@ -70,7 +70,7 @@ async function painted(page: Page, source: string, channel: number) {
   await expect.poll(() => portrait.evaluate((canvas, channel) => (canvas as HTMLCanvasElement).getContext('2d')!.getImageData(128, 128, 1, 1).data[channel], channel)).toBeGreaterThan(150);
 }
 
-test('authentication, session and image delays never flash the default Muse, including on refresh', async ({ page }) => {
+test('cold loading stays neutral and refresh restores the owner’s avatar before the session response', async ({ page }) => {
   let sessionGate = gate(), imageGate = gate(), sessions = 0, images = 0;
   const image = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
   const defaults: string[] = []; page.on('request', request => { if (request.url().includes('/muse/default')) defaults.push(request.url()); });
@@ -80,19 +80,137 @@ test('authentication, session and image delays never flash the default Muse, inc
     await fixture(page, { loaded: false, owner: 'owner-a' });
     await expect(page.locator('.muse-avatar-loading')).toBeVisible();
     await noWrongAvatar(page); expect(sessions).toBe(0);
-    for (let pass = 0; pass < 2; pass++) {
-      if (pass) { sessionGate = gate(); imageGate = gate(); await page.reload(); await expect.poll(() => page.evaluate(() => !!(window as any).loadingFixtureMounted)).toBe(true); }
-      await noWrongAvatar(page); await auth(page, 'owner-a'); await expect.poll(() => sessions).toBe(pass + 1);
-      await expect(page.locator('.muse-avatar-loading')).toBeVisible();
-      await noWrongAvatar(page); sessionGate.release(); await expect.poll(() => images).toBe(pass + 1);
-      await expect(page.locator('.muse-avatar-loading')).toBeVisible();
-      await expect(page.locator('canvas[data-portrait-source]')).toHaveAttribute('data-portrait-ready', 'false');
-      await noWrongAvatar(page); imageGate.release(); await painted(page, customSource('owner-a'), 2);
-      await expect(page.locator('.muse-avatar-loading')).toHaveCount(0);
-      await expect(page.locator('.muse-floating-name')).toHaveText('Kumo'); await noWrongAvatar(page);
-    }
+    await auth(page, 'owner-a'); await expect.poll(() => sessions).toBe(1);
+    await expect(page.locator('.muse-avatar-loading')).toBeVisible();
+    await noWrongAvatar(page); sessionGate.release(); await expect.poll(() => images).toBe(1);
+    await expect(page.locator('.muse-avatar-loading')).toBeVisible();
+    await expect(page.locator('canvas[data-portrait-source]')).toHaveAttribute('data-portrait-ready', 'false');
+    await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled();
+    await noWrongAvatar(page); imageGate.release(); await painted(page, customSource('owner-a'), 2);
+    await expect(page.locator('.muse-avatar-loading')).toHaveCount(0);
+    await expect(page.locator('.muse-floating-name')).toHaveText('Kumo'); await noWrongAvatar(page);
+    await expect.poll(() => page.evaluate(() => !!JSON.parse(sessionStorage.getItem('muze:muse-preview:v1') || '{}').image)).toBe(true);
+    sessionGate = gate(); imageGate = gate(); await page.reload();
+    await expect.poll(() => page.evaluate(() => !!(window as any).loadingFixtureMounted)).toBe(true);
+    await expect(page.locator('canvas[data-portrait-source]')).toHaveCount(0);
+    await auth(page, 'owner-a'); await expect.poll(() => sessions).toBe(2);
+    await painted(page, customSource('owner-a'), 2);
+    await expect(page.locator('.muse-avatar-loading')).toHaveCount(0);
+    expect(images).toBe(1); // The session request is still blocked; pixels came from this owner's cache.
+    await noWrongAvatar(page); sessionGate.release();
     expect(defaults).toEqual([]);
   } finally { sessionGate.release(); imageGate.release(); }
+});
+
+test('a cached portrait stays visible until its newer version has decoded', async ({ page }) => {
+  let fresh = false, newRequested = false;
+  const newImage = gate();
+  const blue = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
+  const red = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#dd3322' } }).png().toBuffer();
+  const updated = { ...profile('owner-a'), muse: { ...profile('owner-a').muse, iconVersion: 'icon-owner-a-new', gazeVersion: 'sheet-owner-a-new' } };
+  await page.route('**/api/muse/session', route => route.fulfill({ json: fresh ? updated : profile('owner-a') }));
+  await page.route('**/api/muse/avatar?*', async route => {
+    const next = route.request().url().includes('owner-a-new');
+    if (next) { newRequested = true; await newImage.promise; }
+    await route.fulfill({ contentType: 'image/png', body: next ? red : blue }).catch(() => {});
+  });
+  try {
+    await fixture(page); await painted(page, customSource('owner-a'), 2);
+    fresh = true; await page.reload(); await expect.poll(() => newRequested).toBe(true);
+    await painted(page, customSource('owner-a'), 2); await expect(page.locator('.muse-avatar-loading')).toHaveCount(0);
+    newImage.release(); await painted(page, customSource('owner-a-new'), 0);
+    await expect(page.locator('.muse-avatar-loading')).toHaveCount(0); await noWrongAvatar(page);
+  } finally { newImage.release(); }
+});
+
+test('a denied session removes the cached portrait and its stored preview', async ({ page }) => {
+  let denied = false;
+  const response = gate();
+  const bytes = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
+  await page.route('**/api/muse/session', async route => {
+    if (denied) { await response.promise; await route.fulfill({ status: 403, json: { error: 'Sign in again.' } }).catch(() => {}); }
+    else await route.fulfill({ json: profile('owner-a') });
+  });
+  await page.route('**/api/muse/avatar?*', route => route.fulfill({ contentType: 'image/png', body: bytes }));
+  try {
+    await fixture(page); await painted(page, customSource('owner-a'), 2);
+    denied = true; await page.reload(); await painted(page, customSource('owner-a'), 2);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('muse-name-saved', { detail: { ownerId: 'owner-a', name: 'Nova' } })));
+    await expect(page.locator('.muse-floating-name')).toHaveText('Nova');
+    response.release(); await expect(page.locator('canvas[data-portrait-source]')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem('muze:muse-preview:v1'))).toBe(null);
+    await expect(page.locator('.muse-avatar-loading')).toBeVisible(); await noWrongAvatar(page);
+  } finally { response.release(); }
+});
+
+test('a saved avatar with failed notebook and portrait previews does not become another generation attempt', async ({ page }) => {
+  let replacements = 0;
+  const bytes = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
+  await page.route('**/api/muse/session', route => route.fulfill({ json: profile('owner-a') }));
+  await page.route('**/api/muse/avatar', route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    replacements++;
+    return route.fulfill({ json: { status: 'completed', iconVersion: 'icon-new', gazeVersion: 'sheet-new' } });
+  });
+  await page.route('**/api/muse/avatar?*', route => route.request().url().includes('sheet-new')
+    ? route.fulfill({ status: 503, json: { error: 'Preview unavailable.' } })
+    : route.fulfill({ contentType: 'image/png', body: bytes }));
+  await fixture(page); await painted(page, customSource('owner-a'), 2);
+  await page.evaluate(() => { (window as any).loadingAppearanceFailure = true; });
+  await page.getByLabel('Choose Muse icon', { exact: true }).setInputFiles({ name: 'new.png', mimeType: 'image/png', buffer: bytes });
+  await expect.poll(() => replacements).toBe(1);
+  await expect(page.getByRole('progressbar', { name: 'Updating Muse avatar' })).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveText('Avatar updated.');
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('muze:muse-preview:v1') || '{}').profile?.muse?.gazeVersion)).toBe('sheet-new');
+  expect(replacements).toBe(1);
+});
+
+test('a delayed startup profile cannot undo a rename made from the cached profile', async ({ page }) => {
+  let delay = false;
+  const session = gate();
+  const bytes = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
+  await page.route('**/api/muse/session', async route => { if (delay) await session.promise; await route.fulfill({ json: profile('owner-a') }).catch(() => {}); });
+  await page.route('**/api/muse/avatar?*', route => route.fulfill({ contentType: 'image/png', body: bytes }));
+  try {
+    await fixture(page); await painted(page, customSource('owner-a'), 2);
+    delay = true; await page.reload(); await painted(page, customSource('owner-a'), 2);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('muse-name-saved', { detail: { ownerId: 'owner-a', name: 'Nova' } })));
+    await expect(page.locator('.muse-floating-name')).toHaveText('Nova');
+    const received = page.waitForResponse(response => response.url().endsWith('/api/muse/session'));
+    session.release(); await received;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator('.muse-floating-name')).toHaveText('Nova');
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('muze:muse-preview:v1') || '{}').profile?.muse?.name)).toBe('Nova');
+  } finally { session.release(); }
+});
+
+test('upload completion preserves a rename during preload and ignores the old startup profile', async ({ page }) => {
+  let delay = false, newRequested = false;
+  const session = gate(), image = gate();
+  const blue = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#2244dd' } }).png().toBuffer();
+  const red = await sharp({ create: { width: 96, height: 96, channels: 4, background: '#dd3322' } }).png().toBuffer();
+  await page.route('**/api/muse/session', async route => { if (delay) await session.promise; await route.fulfill({ json: profile('owner-a') }).catch(() => {}); });
+  await page.route('**/api/muse/avatar', route => route.request().method() === 'POST'
+    ? route.fulfill({ json: { status: 'completed', iconVersion: 'icon-owner-a-new', gazeVersion: 'sheet-owner-a-new' } }) : route.fallback());
+  await page.route('**/api/muse/avatar?*', async route => {
+    const next = route.request().url().includes('owner-a-new');
+    if (next) { newRequested = true; await image.promise; }
+    await route.fulfill({ contentType: 'image/png', body: next ? red : blue }).catch(() => {});
+  });
+  try {
+    await fixture(page); await painted(page, customSource('owner-a'), 2);
+    delay = true; await page.reload(); await painted(page, customSource('owner-a'), 2);
+    await page.getByLabel('Choose Muse icon', { exact: true }).setInputFiles({ name: 'new.png', mimeType: 'image/png', buffer: red });
+    await expect.poll(() => newRequested).toBe(true);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('muse-name-saved', { detail: { ownerId: 'owner-a', name: 'Nova' } })));
+    image.release(); await painted(page, customSource('owner-a-new'), 0);
+    await expect(page.locator('.muse-floating-name')).toHaveText('Nova');
+    const received = page.waitForResponse(response => response.url().endsWith('/api/muse/session'));
+    session.release(); await received;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await painted(page, customSource('owner-a-new'), 0); await expect(page.locator('.muse-floating-name')).toHaveText('Nova');
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('muze:muse-preview:v1') || '{}').profile?.muse?.gazeVersion)).toBe('sheet-owner-a-new');
+  } finally { session.release(); image.release(); }
 });
 
 test('switching owners clears the old appearance while the new Muse loads', async ({ page }) => {

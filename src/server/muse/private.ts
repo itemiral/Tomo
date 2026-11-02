@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { auth } from '@clerk/nextjs/server';
 import { ensureMuse, MuseStoreError, readMuseIcon, readMuseNote, saveMuseIcon, saveMuseNote, validNoteKey } from '../../../scripts/muse-store.mjs';
 import { readAvatar, avatarSummary } from '../../../scripts/muse-avatar.mjs';
 import { PrivateError } from './error';
@@ -66,14 +66,14 @@ export async function jsonBody(request: NextRequest, limit: number): Promise<Rec
 }
 
 export async function publicProfile(profile: Profile) {
-  const user = await currentUser();
-  if (!user || user.id !== profile.ownerId) throw new PrivateError(401, 'Sign in to open your Muse.');
+  // withOwner has already verified the session. This display profile does not
+  // need an additional account lookup before the avatar can start loading.
   const stored = await withMuseProfileSnapshot(async () => {
     const identity = await ensureMuse(profile.ownerId);
     const [icon, appearance] = await Promise.all([readMuseIcon(profile.ownerId), readAvatar(profile.ownerId)]);
     return { ...identity, iconVersion: icon?.version || null, ...avatarSummary(appearance) };
   });
-  return { ownerId: profile.ownerId, ownerName: user.firstName || user.username || 'You', muse: stored };
+  return { ownerId: profile.ownerId, ownerName: 'You', muse: stored };
 }
 export async function avatarImage(bytes: Uint8Array | string, sheet = false, portrait = false) {
   const original = Buffer.from(bytes);
