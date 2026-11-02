@@ -108,15 +108,16 @@ function Minimap({ editor, navigate }: { editor: EditorState; navigate: (point: 
 export default function MuzeEditor() {
   const { isSignedIn, user } = useUser();
   const currentOwner=useRef(user?.id);currentOwner.current=user?.id;
-  const museCanvas = useMuseCanvas(isSignedIn ? user?.id : undefined);
-  const privateBoardRef = useRef<Board | null>(null); privateBoardRef.current = museCanvas.board;
   const [museOpen, setMuseOpen] = useState(false);
+  const engine = useRef<WhiteboardEngine | null>(null);
+  const museActive = useRef(false); museActive.current = museOpen;
+  const museCanvas = useMuseCanvas(isSignedIn ? user?.id : undefined, {active:museOpen,canReceiveChanges:()=>!museActive.current||!engine.current||engine.current.canReceiveSharedChanges(true)});
+  const privateBoardRef = useRef<Board | null>(null); privateBoardRef.current = museCanvas.board;
   const [appearanceRequest,setAppearanceRequest]=useState(0);
   const [chatRequest, setChatRequest] = useState(0);
   const [museActivity,setMuseActivity] = useState<MuseActivity>({label:''});
-  const museActive = useRef(false); museActive.current = museOpen;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null), engine = useRef<WhiteboardEngine | null>(null);
+  const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null);
   const shared = useSharedBoard(isSignedIn ? user?.id : undefined, () => !engine.current || engine.current.canReceiveSharedChanges());
   const sharedRef=useRef(shared);sharedRef.current=shared;
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
@@ -250,6 +251,17 @@ export default function MuzeEditor() {
     else setToast('This file type is not supported. Add a picture, Markdown, text, or Muze file. Audio, video and PDFs need a written description.');
   }
   useEffect(()=>{if(!museOpen&&shared.board&&page)void engine.current?.applySharedDrawing(page).catch(()=>setToast('Could not display the latest board changes. Reload this board.'));},[shared.board,page,museOpen]);
+  useLayoutEffect(()=>{
+    if(!museOpen||!museCanvas.refreshVersion)return;
+    let cancelled=false,timer:ReturnType<typeof setTimeout>;
+    const apply=()=>{
+      if(cancelled||!museActive.current)return;
+      const target=engine.current,board=privateBoardRef.current,currentPage=board?.pages.find(value=>value.id===board.activePage);
+      if(!target||!currentPage||!target.canReceiveSharedChanges(true)){timer=setTimeout(apply,100);return;}
+      void target.applySharedDrawing(currentPage,true).catch(()=>{});
+    };
+    apply();return()=>{cancelled=true;clearTimeout(timer);};
+  },[museCanvas.refreshVersion,museOpen]);
   const leaveMuse = () => { void museCanvas.flush().then(()=>setMuseOpen(false)).catch(()=>{}); };
   if (museOpen && (!active || !page)) return <main className="muze-loading"><span>{museCanvas.error || 'Opening your Muse’s notebook…'}</span><button onClick={()=>setMuseOpen(false)}>Back to whiteboard</button></main>;
   if(!museOpen&&shared.boardId&&!shared.board)return <main className="muze-loading"><span>{!isSignedIn?'Join this board':shared.error||'Opening shared board…'}</span>{!isSignedIn?<SignInButton mode="modal" forceRedirectUrl={typeof window === 'undefined' ? undefined : window.location.href} signUpForceRedirectUrl={typeof window === 'undefined' ? undefined : window.location.href}><button>Sign in to join</button></SignInButton>:shared.error&&<button onClick={shared.reload}>Retry opening board</button>}<button onClick={()=>void shared.open(null).catch(e=>setToast(e.message))}>Back to my boards</button></main>;

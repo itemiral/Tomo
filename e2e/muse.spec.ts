@@ -44,10 +44,11 @@ test('Muse looks toward the pointer, floats through open space, and can be grabb
   await page.mouse.move(700, 400);
   await expect.poll(async () => Math.abs((await muse.boundingBox())!.x - start.x), { timeout: 11000 }).toBeGreaterThan(45);
   const drifting = (await muse.boundingBox())!;
-  await page.mouse.move(drifting.x + 40, drifting.y + 35);
-  const grabbed = (await muse.boundingBox())!;
+  const pointer = { x: drifting.x + 40, y: drifting.y + 35 };
+  await page.mouse.move(pointer.x, pointer.y);
   await page.mouse.down();
-  await page.mouse.move(grabbed.x + 240, grabbed.y - 65, { steps: 12 });
+  const grabbed = (await muse.boundingBox())!;
+  await page.mouse.move(pointer.x + 200, pointer.y - 100, { steps: 12 });
   await page.mouse.up();
   await expect(page.locator('.muse-chat-messages')).toBeHidden();
   const dropped = (await muse.boundingBox())!;
@@ -428,7 +429,7 @@ test('selection actions stay attached to the toolbar with reachable history on m
 });
 
 test('canvas name edits confirm on blur, preserve identity on revert, and persist on rename',async({page})=>{
- const fixture=await museFixture(page);await openMuseEditor(page);await page.screenshot({path:'verification/muse-title-default.png'});const label=page.locator('.muze-vector-surface [id="muse-name"]');const select=async()=>{let box:{x:number;y:number;width:number;height:number}|null=null;await expect.poll(async()=>{box=await label.boundingBox();return box!==null;}).toBe(true);const b=box!;await page.mouse.click(b.x+80,b.y+b.height/2);};await select();const input=page.getByRole('textbox',{name:'Muse name',exact:true});await expect(input).toBeVisible();await expect(page.locator('.muse-name-editor button')).toHaveCount(0);await expect(input).toHaveCSS('font-family',/Shantell Sans/);await input.fill('A long friendly companion name');await page.setViewportSize({width:390,height:844});await expect.poll(async()=>{const field=(await input.boundingBox())!;return field.x+field.width;}).toBeLessThanOrEqual(390);await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});await select();
+ const fixture=await museFixture(page);await openMuseEditor(page);await page.screenshot({path:'verification/muse-title-default.png'});const label=page.locator('.muze-vector-surface [id="muse-name"]');const select=async()=>{await expect(async()=>{const box=await label.boundingBox();expect(box).not.toBeNull();await page.mouse.click(box!.x+Math.min(80,box!.width/2),box!.y+box!.height/2);await expect(page.getByRole('textbox',{name:'Muse name',exact:true})).toBeVisible({timeout:300});}).toPass({timeout:5000,intervals:[100,250,500]});};await select();const input=page.getByRole('textbox',{name:'Muse name',exact:true});await expect(input).toBeVisible();await expect(page.locator('.muse-name-editor button')).toHaveCount(0);await expect(input).toHaveCSS('font-family',/Shantell Sans/);await input.fill('A long friendly companion name');await page.setViewportSize({width:390,height:844});await expect.poll(async()=>{const field=(await input.boundingBox())!;return field.x+field.width;}).toBeLessThanOrEqual(390);await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});await select();
  await input.fill('');await page.mouse.click(700,650);const dialog=page.getByRole('dialog',{name:'Confirm Muse name'});await dialog.getByRole('button',{name:'Rename',exact:true}).click();await expect(page.getByRole('alert')).toContainText('1–40');await dialog.getByRole('button',{name:'Revert',exact:true}).click();await select();await expect(input).toHaveValue('Muse');await input.fill('Never saved');await page.getByRole('button',{name:'Back to whiteboard',exact:true}).click();await expect(dialog).toBeVisible();await expect(page.getByRole('button',{name:'Back to whiteboard'})).toBeVisible();await page.keyboard.press('Escape');await select();await expect(input).toHaveValue('Muse');await input.fill('小月');await page.keyboard.press('Enter');await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Rename',exact:true}).click();await expect.poll(()=>fixture.canvases.get('owner-a')?.board.museName).toBe('小月');await page.getByRole('button',{name:'Back to whiteboard',exact:true}).click();await expect(page.locator('.muse-floating-name')).toHaveText('小月');await page.reload();await expect(page.locator('.muse-floating-name')).toHaveText('小月');await openMuseEditor(page);await expect(page.locator('.muse-appearance-label')).toContainText('小月');await page.screenshot({path:'verification/muse-name-canvas.png'});
 });
 

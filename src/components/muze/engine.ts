@@ -114,7 +114,7 @@ export class WhiteboardEngine {
     for (const event of ['object:scaling', 'object:rotating'] as const) c.on(event, () => { this.syncLabels(); this.connectors(); this.emit(); });
     c.on('path:created', ({ path }) => { path.id = crypto.randomUUID(); path.muzeKind = this.tool; path.muzeDash = this.paint.dash; path.muzeFill = this.paint.fill; path.opacity = this.tool === 'highlight' ? this.paint.opacity * .4 : this.paint.opacity; this.assignFrames(); this.checkpoint(); });
     c.on('text:editing:exited', ({ target }) => this.finishText(target));
-    c.on('text:changed', ({ target }) => { if(target instanceof MuzeDocument) target.markdown = target.text; this.growText(target); this.publish(); });
+    c.on('text:changed', ({ target }) => { if(target instanceof MuzeDocument) target.syncMarkdown(); this.growText(target); this.publish(); });
     c.on('mouse:dblclick', ({ e }) => {
       if (this.tool !== 'select') return;
       const target = c.findTarget(e).target;
@@ -166,9 +166,13 @@ export class WhiteboardEngine {
     this.opened = true;
   }
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
-  canReceiveSharedChanges() { return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !this.editing(); }
-  async applySharedDrawing(drawing: Drawing) {
-    if (!this.canReceiveSharedChanges() || equalBoardValues(this.serialize().objects, drawing.objects)) return;
+  canReceiveSharedChanges(ignoreMuseUi = false) {
+    const editingCanvas = this.canvas.getActiveObject() instanceof IText && (this.canvas.getActiveObject() as IText).isEditing;
+    const museInput = ignoreMuseUi && !!document.activeElement?.closest('[data-muse-ui="true"]');
+    return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !editingCanvas && (!this.editing() || museInput);
+  }
+  async applySharedDrawing(drawing: Drawing, ignoreMuseUi = false) {
+    if (!this.canReceiveSharedChanges(ignoreMuseUi) || equalBoardValues(this.serialize().objects, drawing.objects)) return;
     const tool = this.tool, paint = {...this.paint}, viewport = [...this.canvas.viewportTransform], selected = this.canvas.getActiveObjects().map(object => object.id);
     await this.load({...drawing,viewport});
     if (this.closed) return;

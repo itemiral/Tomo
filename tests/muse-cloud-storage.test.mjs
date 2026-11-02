@@ -13,6 +13,8 @@ const { withMuseStorage, withStorageTransaction, withMuseLease, readFile, writeF
 const { museDirectory, readMuseNote, saveMuseNote, ensureMuse } = await import('../scripts/muse-store.mjs');
 const { readMuseCanvas, saveMuseCanvas } = await import('../scripts/muse-canvas.mjs');
 const { replaceAvatar, readAvatar, uploadAvatar } = await import('../scripts/muse-avatar.mjs');
+const { readMuseLearning, commitMuseTurn } = await import('../scripts/muse-learning.mjs');
+const { readMuseChat } = await import('../scripts/muse-store.mjs');
 
 const db = new PGlite();
 await db.exec(`
@@ -69,6 +71,49 @@ function client(ownerId) {
 }
 
 const cloud = (owner, operation) => withMuseStorage(owner, client(owner), operation);
+
+test('adaptive notes and conversation commit together in owner-scoped cloud storage', async () => {
+  const owner = 'user_learning_cloud';
+  const snapshot = await cloud(owner, () => readMuseLearning(owner, 'board:page'));
+  const userMessage = { id: randomUUID(), role: 'user', content: 'I prefer concise explanations.' };
+  const input = {
+    snapshot, userMessage, messages: [userMessage, { id: randomUUID(), role: 'assistant', content: 'I will keep things concise.' }],
+    personalization: { updates: [{ target: 'soul', scope: 'owner', key: 'detail', operation: 'upsert', text: 'Prefer concise explanations.', evidence: 'I prefer concise explanations' }], summary: 'The owner prefers concise explanations.' },
+  };
+  await cloud(owner, () => withMuseLease(owner, 'chat', () => commitMuseTurn(owner, 'board:page', input)));
+  const result = await cloud(owner, () => readMuseLearning(owner, 'board:page'));
+  assert.equal(result.entries.length, 1);
+  assert.equal(result.messages.length, 2);
+  assert.match(result.notes.soul.content, /Prefer concise explanations/);
+  assert.equal(result.summary, 'The owner prefers concise explanations.');
+  assert.deepEqual(Object.keys(await cloud(owner, () => ensureMuse(owner))).sort(), ['id', 'name']);
+  assert.equal((await cloud('user_learning_other', () => readMuseLearning('user_learning_other', 'board:page'))).entries.length, 0);
+  await assert.rejects(cloud('user_learning_other', () => readMuseLearning(owner, 'board:page')), { status: 403 });
+});
+
+test('a cross-worker note change rolls back adaptive metadata and the conversation together', async () => {
+  const owner = 'user_learning_atomic';
+  const snapshot = await cloud(owner, () => readMuseLearning(owner, 'board:page'));
+  const connection = client(owner), original = connection.rpc;
+  let injected = false;
+  connection.rpc = async (name, args) => {
+    if (!injected && name === 'commit_muse_files' && args.changes.some(change => change.name.startsWith('chat-') && change.content)) {
+      injected = true;
+      await asUser(owner, tx => tx.query("update public.muse_private_files set content=$1,version=gen_random_uuid() where owner_id=$2 and name='soul.md'", [Buffer.from('# Soul\nKeep my custom voice.').toString('base64'), owner]));
+    }
+    return original(name, args);
+  };
+  const userMessage = { id: randomUUID(), role: 'user', content: 'Always be concise.' };
+  const input = {
+    snapshot, userMessage, messages: [userMessage, { id: randomUUID(), role: 'assistant', content: 'Understood.' }],
+    personalization: { updates: [{ target: 'soul', scope: 'owner', key: 'detail', operation: 'upsert', text: 'Be concise.', evidence: 'Always be concise' }], summary: 'Concise replies.' },
+  };
+  await assert.rejects(withMuseStorage(owner, connection, () => commitMuseTurn(owner, 'board:page', input)), { status: 409 });
+  const after = await cloud(owner, () => readMuseLearning(owner, 'board:page'));
+  assert.equal(after.notes.soul.content, '# Soul\nKeep my custom voice.');
+  assert.equal(after.entries.length, 0);
+  assert.deepEqual(await cloud(owner, () => readMuseChat(owner, 'board:page')), []);
+});
 
 test('initial Muse creation retries a bounded application conflict', async () => {
   const owner = 'user_initial_conflict', connection = client(owner);
