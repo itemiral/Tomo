@@ -6,9 +6,9 @@ import { MuseIcon, type MuseProfile } from './shared';
 
 type Position = { x: number; y: number };
 export type Obstacle = Position & { id?: string; w: number; h: number };
-export type MuseActivity = { label: string; targetId?: string };
+export type MuseActivity = { label: string; targetId?: string; targetIds?: string[]; thread?:string; ownerId?:string };
 type Props = { profile?: MuseProfile | null; profileLoading?:boolean; avatarPending?:boolean; open: () => void; changeAvatar?:()=>void; chat?:()=>void; obstacles: Obstacle[]; activity: MuseActivity; chatOpen?: boolean };
-const controls = '.muze-header,.board-participants,.board-peer-muses,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
+const controls = '.muze-header,.board-participants,.board-peer-muses,.board-muse-target-avatar,.muze-style-panel,.muze-minimap,.muze-popover,.muse-chat-stack,.muse-chat,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-tabs';
 
 export function FloatingMuse({ profile, profileLoading, avatarPending, open, changeAvatar, chat, obstacles, activity, chatOpen = false }: Props) {
   const button = useRef<HTMLButtonElement>(null);
@@ -56,7 +56,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
     if (drag.current || hovered.current || focused.current) return;
     const { w, h, clamp, overlap, spaces, home } = scene();
     const work = latest.current.activity;
-    const target = work.label ? latest.current.obstacles.find(b => b.id === work.targetId) : undefined;
+    const target = work.targetId ? latest.current.obstacles.find(b => b.id === work.targetId) : undefined;
     const preferred = target ? clamp({ x: target.x - w - 24, y: target.y + 24 }) : work.label ? clamp({ x: innerWidth * .55, y: innerHeight * .4 }) : pendingHome.current ? home : clamp(point.current);
     const nearby = target ? [{ x: target.x - w - 24, y: target.y + 24 }, { x: target.x + target.w + 24, y: target.y + 24 }, { x: target.x, y: target.y - h - 24 }, { x: target.x, y: target.y + target.h + 24 }].map(clamp) : [];
     const score = (p: Position) => overlap(p) * 1000 + Math.hypot(p.x - preferred.x, p.y - preferred.y);

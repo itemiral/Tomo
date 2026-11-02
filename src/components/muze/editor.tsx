@@ -22,6 +22,7 @@ import { SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import { CanvasComments } from './comments';
 import { useMuseCanvas } from '../muse/use-muse-canvas';
 import { MuseCompanion } from '../muse/companion';
+import type { MuseActivity } from '../muse/floating';
 import { normalizeImageFile } from '../muse/image-upload';
 import { SignInToShare } from '../muse/sign-in';
 import { boardContext as makeBoardContext } from '@/lib/muse-board';
@@ -112,7 +113,7 @@ export default function MuzeEditor() {
   const [museOpen, setMuseOpen] = useState(false);
   const [appearanceRequest,setAppearanceRequest]=useState(0);
   const [chatRequest, setChatRequest] = useState(0);
-  const [museWorking,setMuseWorking] = useState(false);
+  const [museActivity,setMuseActivity] = useState<MuseActivity>({label:''});
   const museActive = useRef(false); museActive.current = museOpen;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null), engine = useRef<WhiteboardEngine | null>(null);
@@ -155,7 +156,9 @@ export default function MuzeEditor() {
   const ordinary = workspace?.boards.find(board => board.id === workspace.activeBoard);
   const active = museOpen ? museCanvas.board : shared.boardId ? shared.board : ordinary;
   const page = active?.pages.find(item => item.id === active.activePage);
-  const presence = useBoardPresence({boardId:shared.board?.id,userId:isSignedIn?user?.id:undefined,name:user?.firstName||user?.username||'Guest',pageId:page?.id,viewport:editor.viewport,enabled:!!shared.board&&!museOpen&&!!isSignedIn,museWorking});
+  const museWorking = !museOpen && !!museActivity.label && museActivity.ownerId === user?.id && museActivity.thread === active?.id + ':' + page?.id;
+  const museTargetId = museWorking && editor.items.some(item => item.id === museActivity.targetId) ? museActivity.targetId : undefined;
+  const presence = useBoardPresence({boardId:shared.board?.id,userId:isSignedIn?user?.id:undefined,name:user?.firstName||user?.username||'Guest',pageId:page?.id,viewport:editor.viewport,enabled:!!shared.board&&!museOpen&&!!isSignedIn,museWorking,museTargetId});
   const participantProfiles=useBoardProfiles({boardId:shared.board?.id,userId:isSignedIn?user?.id:undefined,enabled:!!shared.board&&!museOpen&&!!isSignedIn,connected:presence.connected,peerIds:presence.peers.map(person=>person.userId),profileVersion:JSON.stringify([user?.firstName,user?.username,user?.imageUrl])});
   useEffect(() => { if (active) setName(active.name); }, [active?.id, active?.name]);
   const updateBoard = useCallback((update: (board: Board) => Board) => {
@@ -209,6 +212,21 @@ export default function MuzeEditor() {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, []);
 
+  async function prepareMuseContext() {
+    const target = engine.current, owner = currentOwner.current, privateNotebook = museActive.current;
+    const boardId = active?.id, pageId = page?.id;
+    const currentBoard = () => museActive.current ? privateBoardRef.current : sharedRef.current.board || current.current?.boards.find(board => board.id === current.current?.activeBoard);
+    const isCurrent = () => engine.current === target && currentOwner.current === owner && museActive.current === privateNotebook && currentBoard()?.id === boardId && currentBoard()?.activePage === pageId;
+    if (!target || !owner || !boardId || !pageId || !isCurrent()) throw new Error('Open your board before messaging Muse.');
+    const selectedIds = target.getSelectedIds();
+    target.commitTextEditing();
+    await museCanvas.flush();
+    if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+    await sharedRef.current.flush();
+    if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+    const board = currentBoard()!, currentPage = board.pages.find(item => item.id === pageId)!;
+    return makeBoardContext(board.name, currentPage.name, target.serialize().objects, selectedIds, target.getSceneItems());
+  }
   async function attachImage(file: File, signal: AbortSignal) {
     const target = engine.current, owner = currentOwner.current, privateNotebook = museActive.current;
     const currentBoard = () => museActive.current ? privateBoardRef.current : sharedRef.current.board || current.current?.boards.find(board => board.id === current.current?.activeBoard);
@@ -238,7 +256,7 @@ export default function MuzeEditor() {
   if (!workspace || !active || !page) return <main className="muze-loading"><span>Muze</span><i/>{toast && <p role="alert">{toast}</p>}</main>;
   const gridDots = gridPattern(editor.zoom, editor.viewport[4], editor.viewport[5]);
   const selected = editor.selected > 0;
-  const boardContext = makeBoardContext(active.name, page.name, page.objects);
+  const boardContext = makeBoardContext(active.name, page.name, page.objects, editor.selectedIds, editor.items);
   const textStyles = ['text', 'note', 'shape', 'arrow'].includes(editor.selectionKind) || ['text', 'note'].includes(editor.tool);
   const lineStyles = !['text', 'note', 'image'].includes(editor.selectionKind) && !['text', 'note'].includes(editor.tool);
   const arrowStyles = editor.selectionKind === 'arrow' || editor.tool === 'arrow';
@@ -345,11 +363,11 @@ export default function MuzeEditor() {
     {editor.items.map(item=>{const object=page.objects.find(o=>o.id===item.id);const url=typeof object?.sourceUrl==='string'&&/^https:\/\//.test(object.sourceUrl)?object.sourceUrl:null;return url?<a key={'source-'+item.id} className="muse-image-source" data-muse-ui="true" href={url} target="_blank" rel="noopener noreferrer" style={{left:item.x*editor.zoom+editor.viewport[4],top:(item.y+item.h)*editor.zoom+editor.viewport[5]+5}}>Source: {String(object?.sourceTitle||'image')}{object?.attribution?' · '+String(object.attribution):''}</a>:null;})}
     {museOpen&&engine.current?.museNameSelected()&&editor.items.filter(item=>item.id==='muse-name').map(item=><NameOnCanvas key={item.id} name={String((museCanvas.board as Board & {museName?:string})?.museName||'Muse')} left={item.x*editor.zoom+editor.viewport[4]} top={item.y*editor.zoom+editor.viewport[5]} zoom={editor.zoom} save={name=>{engine.current?.renameMuse(name);}} cancel={()=>engine.current?.clearSelection()}/>)}
     {museOpen&&editor.items.filter(item=>item.id==='muse-appearance').map(item=><div key={item.id} className="muse-appearance-label" aria-label="Muse’s avatar. Select the image to replace it." style={{left:(item.x+item.w/2)*editor.zoom+editor.viewport[4],top:(item.y+item.h)*editor.zoom+editor.viewport[5]+8,width:Math.max(120,item.w*editor.zoom),transform:'translateX(-50%)'}}><span>{String((museCanvas.board as Board & {museName?:string})?.museName||'Muse')}’s avatar</span></div>)}
-    {!museOpen&&shared.board&&<><BoardPeerCursors profiles={participantProfiles} cursors={presence.cursors} pageId={page.id} viewport={editor.viewport}/><BoardPeerMuses profiles={participantProfiles} peers={presence.peers} userId={user?.id} pageId={page.id}/></>}
+    {!museOpen&&shared.board&&<><BoardPeerCursors profiles={participantProfiles} cursors={presence.cursors} pageId={page.id} viewport={editor.viewport}/><BoardPeerMuses profiles={participantProfiles} peers={presence.peers} userId={user?.id} pageId={page.id} items={editor.items} viewport={editor.viewport}/></>}
     <CanvasComments key={active.id+page.id} comments={active.comments||[]} pageId={page.id} firstPageId={active.pages[0].id} viewport={editor.viewport} placement={commentPlacement} save={comments=>updateBoard(board=>({...board,comments}))}/>
     {!museOpen&&shared.board&&shared.error&&<div className="muse-save-error" role="alert">{shared.error}{shared.conflict?<><button onClick={saveFile}>Save a copy</button><button onClick={shared.reload}>Reload shared version</button></>:<button onClick={()=>void shared.flush().catch(()=>{})}>Retry save</button>}</div>}
     {museOpen && <><div className="muse-save-status" role="status">{museCanvas.status}</div>{museCanvas.error && <div className="muse-save-error" role="alert">{museCanvas.error}<button onClick={()=>void museCanvas.flush().catch(()=>{})}>Retry save</button></div>}</>}
-    <MuseCompanion attachImage={attachImage} onActivity={setMuseWorking} appearanceSelected={museOpen&&engine.current?.appearanceSelected()} appearanceAnchor={(()=>{const box=editor.items.find(item=>item.id==='muse-appearance');return box?{x:(box.x+box.w)*editor.zoom+editor.viewport[4]+12,y:box.y*editor.zoom+editor.viewport[5]}:undefined;})()} openAppearance={()=>{setMuseOpen(true);setAppearanceRequest(v=>v+1);}} appearanceChanged={async()=>{const response=await fetch('/api/muse/avatar',{cache:'no-store'});if(!response.ok)throw new Error('The avatar saved, but its board preview could not load. Reopen the notebook.');const blob=await response.blob();const source=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(blob);});if(currentOwner.current!==user?.id)return;if(museActive.current)await engine.current?.updateAppearance(source);else museCanvas.update(board=>{const replace=(objects:Record<string,unknown>[]):Record<string,unknown>[]=>objects.map(o=>o.id==='muse-appearance'?{...o,src:source}:Array.isArray(o.objects)?{...o,objects:replace(o.objects)}:o);return {...board,pages:board.pages.map(p=>({...p,objects:replace(p.objects)}))};});}} beforeSend={async()=>{await museCanvas.flush();await shared.flush();}} chatRequest={chatRequest} thread={active.id + ':' + page.id} boardContext={boardContext} applyActions={actions => {
+    <MuseCompanion attachImage={attachImage} onActivity={setMuseActivity} selectedIds={editor.selectedIds} prepareContext={prepareMuseContext} appearanceSelected={museOpen&&engine.current?.appearanceSelected()} appearanceAnchor={(()=>{const box=editor.items.find(item=>item.id==='muse-appearance');return box?{x:(box.x+box.w)*editor.zoom+editor.viewport[4]+12,y:box.y*editor.zoom+editor.viewport[5]}:undefined;})()} openAppearance={()=>{setMuseOpen(true);setAppearanceRequest(v=>v+1);}} appearanceChanged={async()=>{const response=await fetch('/api/muse/avatar',{cache:'no-store'});if(!response.ok)throw new Error('The avatar saved, but its board preview could not load. Reopen the notebook.');const blob=await response.blob();const source=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(blob);});if(currentOwner.current!==user?.id)return;if(museActive.current)await engine.current?.updateAppearance(source);else museCanvas.update(board=>{const replace=(objects:Record<string,unknown>[]):Record<string,unknown>[]=>objects.map(o=>o.id==='muse-appearance'?{...o,src:source}:Array.isArray(o.objects)?{...o,objects:replace(o.objects)}:o);return {...board,pages:board.pages.map(p=>({...p,objects:replace(p.objects)}))};});}} chatRequest={chatRequest} thread={active.id + ':' + page.id} boardContext={boardContext} applyActions={actions => {
       const now = current.current, board = museActive.current ? privateBoardRef.current : sharedRef.current.board || now?.boards.find(board => board.id === now.activeBoard);
       if (!board || board.id !== active.id || board.activePage !== page.id) return { ids: [], skipped: actions.cards.length + actions.updates.length };
       return engine.current?.applyMuseActions(actions) || { ids: [], skipped: actions.cards.length + actions.updates.length };

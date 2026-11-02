@@ -1,12 +1,14 @@
-export type BoardPerson = {userId:string;name:string;tabId:string;pageId:string;muse:'idle'|'working'};
+export type BoardPerson = {userId:string;name:string;tabId:string;pageId:string;muse:'idle'|'working';museTargetId?:string};
 export type CursorPosition = {tabId:string;pageId:string;x:number|null;y:number|null};
 export type BoardCursor = BoardPerson & {x:number;y:number;receivedAt:number};
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const id=(value:unknown,max=128):value is string=>typeof value==='string'&&value.length>0&&value.length<=max&&/^[\w-]+$/.test(value);
+export const museTargetId=(value:unknown):string|undefined=>id(value,100)?value:undefined;
 export function presenceName(value:unknown){return typeof value==='string'?value.replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'').trim().slice(0,40)||'Guest':'Guest';}
 export function readPerson(value:unknown):BoardPerson|null{
   if(!record(value)||!id(value.userId)||!id(value.tabId)||!id(value.pageId)||!['idle','working'].includes(String(value.muse)))return null;
-  return {userId:value.userId,name:presenceName(value.name),tabId:value.tabId,pageId:value.pageId,muse:value.muse as BoardPerson['muse']};
+  const target=value.muse==='working'?museTargetId(value.museTargetId):undefined;
+  return {userId:value.userId,name:presenceName(value.name),tabId:value.tabId,pageId:value.pageId,muse:value.muse as BoardPerson['muse'],...(target?{museTargetId:target}:{})};
 }
 export function readCursor(value:unknown):CursorPosition|null{
   if(!record(value)||!id(value.tabId)||!id(value.pageId))return null;

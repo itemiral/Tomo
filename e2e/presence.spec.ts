@@ -55,13 +55,16 @@ function compiledFixture() {
       import './src/app/globals.css'; import './src/components/muze/whiteboard.css'; import './src/components/muse/muse.css';
       function Board(){
         const seed=window.presenceSeed;
-        const [userId,setUserId]=useState(seed.userId),[pageId,setPageId]=useState('page-one'),[enabled,setEnabled]=useState(true),[museWorking,setWorking]=useState(false),[viewport,setViewport]=useState(seed.viewport),[clicks,setClicks]=useState(0);
-        const presence=useBoardPresence({boardId:seed.boardId,userId,name:seed.name,pageId,viewport,enabled,museWorking,soul:'SECRET_SOUL',memory:'SECRET_MEMORY',chat:'SECRET_CHAT'});
+        const [userId,setUserId]=useState(seed.userId),[pageId,setPageId]=useState('page-one'),[enabled,setEnabled]=useState(true),[museWorking,setWorking]=useState(false),[museTargetId,setTarget]=useState(undefined),[viewport,setViewport]=useState(seed.viewport),[clicks,setClicks]=useState(0);
+        const presence=useBoardPresence({boardId:seed.boardId,userId,name:seed.name,pageId,viewport,enabled,museWorking,museTargetId,soul:'SECRET_SOUL',memory:'SECRET_MEMORY',chat:'SECRET_CHAT'});
         return <main className="muze-app"><div className="muze-drawing-surface" style={{position:'fixed',inset:0}} aria-label="Shared canvas"/>
           <nav style={{position:'fixed',top:12,left:12,zIndex:1000}} data-muse-ui="true">
             <button onClick={()=>setViewport([.5,0,0,.5,80,40])}>Pan and zoom</button>
-            <button onClick={()=>setPageId(p=>p==='page-one'?'page-two':'page-one')}>Change page</button>
+            <button onClick={()=>{setPageId(p=>p==='page-one'?'page-two':'page-one');setWorking(false);setTarget(undefined);}}>Change page</button>
             <button onClick={()=>setWorking(v=>!v)}>Toggle Muse work</button>
+            <button onClick={()=>{setWorking(true);setTarget('note-one');}}>Work on first note</button>
+            <button onClick={()=>setTarget('note-two')}>Work on second note</button>
+            <button onClick={()=>setViewport([1,0,0,1,-2000,0])}>Move away from work</button>
             <button onClick={()=>setEnabled(v=>!v)}>Private notebook</button>
             <button onClick={()=>{setUserId(undefined);window.presenceOwner=undefined;window.dispatchEvent(new Event('presence-owner'));}}>Sign out</button>
             <button onClick={()=>{setUserId('bo');window.presenceOwner='bo';window.dispatchEvent(new Event('presence-owner'));}}>Switch account</button>
@@ -73,7 +76,7 @@ function compiledFixture() {
           </div>
           <BoardParticipants peers={presence.peers} userId={userId} connected={presence.connected}/>
           <BoardPeerCursors cursors={presence.cursors} pageId={pageId} viewport={viewport}/>
-          <BoardPeerMuses peers={presence.peers} userId={userId} pageId={pageId}/>
+          <BoardPeerMuses peers={presence.peers} userId={userId} pageId={pageId} viewport={viewport} items={[{id:'note-one',x:200,y:160,w:180,h:120},{id:'note-two',x:800,y:180,w:180,h:120}]}/>
         </main>;
       }
       const root=createRoot(document.getElementById('root'));window.presenceUnmount=()=>root.unmount();root.render(<Board/>);
@@ -177,22 +180,23 @@ test('cursor positions include chat and toolbar controls without blocking their 
  }finally{await a.close();await b.close();}
 });
 
-test('Muse status is public metadata only and private notebooks, sign-out, and unmount clear presence', async ({ browser }) => {
+test('Muse targets are public metadata only and page changes, private notebooks, and sign-out clear them', async ({ browser }) => {
   const bus = transport(), a = await browser.newContext(), b = await browser.newContext();
   try {
     const ada = await a.newPage(), bo = await b.newPage();
     await ada.clock.install();
     await fixture(ada, bus, 'ada'); await fixture(bo, bus, 'bo');
     await expect(bo.getByLabel('People on this board')).toContainText('Ada');
-    await ada.getByRole('button', { name: 'Toggle Muse work', exact: true }).click();
+    await ada.getByRole('button', { name: 'Work on first note', exact: true }).click();
     await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toBeVisible();
     const orb = await bo.getByLabel('Ada’s Muse, working', { exact: true }).locator('.board-peer-muse-icon').boundingBox();
     expect(orb!.width).toBeGreaterThan(30); expect(orb!.height).toBeGreaterThan(30);
     await ada.getByRole('button', { name: 'Change page', exact: true }).click();
     await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toHaveCount(0);
+    await expect(bo.locator('.board-muse-targets [data-target-id]')).toHaveCount(0);
     await expect(bo.getByLabel('People on this board')).toContainText('Ada');
     await ada.getByRole('button', { name: 'Change page', exact: true }).click();
-    await expect(bo.getByLabel('Ada’s Muse, working', { exact: true })).toBeVisible();
+    await expect(bo.getByLabel('Ada’s Muse, idle', { exact: true })).toBeVisible();
     await ada.mouse.move(550, 350);
     await expect(bo.getByLabel('Ada’s cursor', { exact: true })).toBeVisible();
     await ada.getByRole('button', { name: 'Private notebook', exact: true }).click();
@@ -212,9 +216,33 @@ test('Muse status is public metadata only and private notebooks, sign-out, and u
     for (const payload of payloads) {
       expect(JSON.stringify(payload)).not.toMatch(/SECRET_|soul|memory|chat|prompt|reply|api.?key/i);
       expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThan(1024);
-      expect(Object.keys(payload).every(key => ['userId', 'name', 'tabId', 'pageId', 'muse', 'x', 'y', 'updatedAt', 'sentAt', 'ts'].includes(key))).toBe(true);
+      expect(Object.keys(payload).every(key => ['userId', 'name', 'tabId', 'pageId', 'muse', 'museTargetId', 'x', 'y', 'updatedAt', 'sentAt', 'ts'].includes(key))).toBe(true);
     }
   } finally { await a.close(); await b.close(); }
+});
+
+test('peer Muses follow shared work targets across pan and zoom without covering controls or increasing presence traffic',async({browser})=>{
+ const bus=transport(),a=await browser.newContext(),b=await browser.newContext();
+ try{
+  const ada=await a.newPage(),bo=await b.newPage();await ada.clock.install();await fixture(ada,bus,'ada');await fixture(bo,bus,'bo');
+  await expect(bo.getByLabel('People on this board')).toContainText('Ada');
+  await ada.getByRole('button',{name:'Work on first note',exact:true}).click();await ada.clock.runFor(2100);
+  const target=bo.locator('.board-muse-targets [data-target-id="note-one"]'),outline=target.locator('.board-muse-target-outline');
+  await expect(target).toHaveCount(1);await expect(bo.locator('.board-peer-muses').getByLabel('Ada’s Muse, working',{exact:true})).toHaveCount(0);
+  const before=(await outline.boundingBox())!;expect(before.x).toBe(194);expect(before.y).toBe(154);
+  const badge=(await target.locator('.board-muse-target-avatar').boundingBox())!;expect(badge.x).toBeGreaterThanOrEqual(380);expect(badge.width).toBe(40);
+  const layer=await bo.locator('.board-muse-targets').evaluate(el=>({z:Number(getComputedStyle(el).zIndex),passive:[el,...el.querySelectorAll('*')].every(item=>getComputedStyle(item).pointerEvents==='none')}));expect(layer.z).toBeLessThan(8);expect(layer.passive).toBe(true);
+  await bo.screenshot({path:'/tmp/muze-peer-work-target.png'});
+  await bo.getByRole('button',{name:'Pan and zoom',exact:true}).click();await expect.poll(async()=>Math.round((await outline.boundingBox())!.x)).toBe(174);expect(Math.round((await outline.boundingBox())!.y)).toBe(114);
+  for(let index=0;index<5;index++){await ada.getByRole('button',{name:'Work on second note',exact:true}).click();await ada.getByRole('button',{name:'Work on first note',exact:true}).click();}
+  await ada.getByRole('button',{name:'Work on second note',exact:true}).click();await ada.clock.runFor(2100);
+  await expect(bo.locator('.board-muse-targets [data-target-id="note-two"]')).toHaveCount(1);await expect(target).toHaveCount(0);
+  await bo.getByRole('button',{name:'Move away from work',exact:true}).click();await expect(bo.locator('.board-muse-targets [data-target-id]')).toHaveCount(0);await expect(bo.locator('.board-peer-muses').getByLabel('Ada’s Muse, working',{exact:true})).toBeVisible();
+  await bo.getByRole('button',{name:'Pan and zoom',exact:true}).click();await expect(bo.locator('.board-muse-targets [data-target-id="note-two"]')).toHaveCount(1);
+  await ada.getByRole('button',{name:'Toggle Muse work',exact:true}).click();await ada.clock.runFor(2100);await expect(bo.locator('.board-muse-targets [data-target-id]')).toHaveCount(0);await expect(bo.getByLabel('Ada’s Muse, idle',{exact:true})).toBeVisible();
+  const tracks=bus.messages.filter(message=>message.operation==='track'&&message.payload?.userId==='ada');expect(tracks.length).toBeLessThanOrEqual(4);expect(tracks.at(-1)!.payload).not.toHaveProperty('museTargetId');expect(bus.messages.filter(message=>message.operation==='subscribe')).toHaveLength(2);expect(bus.messages.some(message=>message.operation==='untrack')).toBe(false);
+  for(const message of tracks)expect(JSON.stringify(message.payload)).not.toMatch(/SECRET_|soul|memory|chat|prompt|reply|api.?key/i);
+ }finally{await a.close();await b.close();}
 });
 
 test('presence recovers after a temporary session-token failure', async ({ browser }) => {

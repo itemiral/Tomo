@@ -26,3 +26,33 @@ test('normal chat runs real search orchestration with citations and no notebook 
  globalThis.fetch=async(url,options)=>{const request=JSON.parse(options.body);calls.push({url,request});if(url.endsWith('/responses'))return new Response(JSON.stringify({status:'completed',output:[{type:'web_search_call',status:'completed'},{type:'message',content:[{type:'output_text',text:'A verified public finding.',annotations:[{type:'url_citation',url:'https://example.org/evidence',title:'Actual evidence',start_index:0,end_index:25}]}]}]}));return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Here is the finding.',cards:[],updates:[]})}}]}));};
  try{const result=await askMuse('chat-search-test',{thread:'board:search',message:'Search the web for public gardens',board:JSON.stringify({board:'Test',page:'One',objects:[]})},new AbortController().signal);assert.equal(calls.length,2);assert.equal(calls[0].request.input[1].content,'Search the web for public gardens');assert.doesNotMatch(JSON.stringify(calls[0].request),/Soul.md|Memory.md|Private Muse/);assert.match(calls[1].request.messages.at(-1).content,/A verified public finding/);assert.match(result.messages.at(-1).content,/Actual evidence.*https:\/\/example.org\/evidence/);}finally{globalThis.fetch=original;}
 });
+
+test('selected context reaches Muse and scoped suggestions stay outside saved chat and board actions',async()=>{
+ const {readMuseChat}=await import('../scripts/muse-store.mjs');
+ const original=globalThis.fetch;let captured,offScope=false;
+ const board={board:'A shared plan',page:'Page 1',selectedIds:['one'],objects:[
+  {id:'one',type:'MuzeNote',text:'Long first section',editable:true,bounds:{x:20,y:30,w:360,h:240}},
+  {id:'two',type:'MuzeNote',text:'Keep this section',editable:true,bounds:{x:430,y:30,w:360,h:240}},
+ ]};
+ globalThis.fetch=async(url,options)=>{
+  assert.equal(url,'https://api.meta.ai/v1/chat/completions');captured=JSON.parse(options.body);
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'A shorter first section.',cards:[],updates:[{id:offScope?'two':'one',text:'Short first section'}],suggestions:['Identify the next step']})}}]}));
+ };
+ try{
+  const request={thread:'focused:page',message:'Make this concise',board:JSON.stringify(board)};
+  const result=await askMuse('selected-context-owner',request,new AbortController().signal);
+  const content=captured.messages.at(-1).content;
+  assert.match(content,/"selectedIds":\["one"\]/);
+  assert.match(content,/"bounds":\{"x":20,"y":30,"w":360,"h":240\}/);
+  assert.match(content,/Keep this section/);
+  assert.deepEqual(result.actions.focusIds,['one']);
+  assert.deepEqual(result.actions.updates,[{id:'one',text:'Short first section',expectedText:'Long first section'}]);
+  assert.deepEqual(result.suggestions,['Identify the next step']);
+  assert.equal(Object.hasOwn(result.actions,'suggestions'),false);
+  const saved=await readMuseChat('selected-context-owner','focused:page');
+  assert.equal(saved.length,2);assert.doesNotMatch(JSON.stringify(saved),/Identify the next step|selectedIds|bounds/);
+  offScope=true;
+  await assert.rejects(askMuse('selected-context-owner',request,new AbortController().signal),{status:502});
+  assert.deepEqual(await readMuseChat('selected-context-owner','focused:page'),saved);
+ }finally{globalThis.fetch=original;}
+});

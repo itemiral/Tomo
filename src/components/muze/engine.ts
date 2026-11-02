@@ -14,9 +14,9 @@ type EditableText = IText | Textbox | MuzeText | MuzeLabel | MuzeNote;
 
 export type Tool = 'comment' | 'select' | 'hand' | 'draw' | 'eraser' | 'arrow' | 'text' | 'note' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'line' | 'highlight' | 'frame' | 'laser' | Geo;
 export type Paint = { color: string; fill: 'none' | 'soft' | 'solid' | 'pattern'; size: number; dash: 'draw' | 'solid' | 'dashed' | 'dotted'; opacity: number; font: string; fontSize: number; align: 'left' | 'center' | 'right'; verticalAlign: 'top' | 'middle' | 'bottom'; arrowStart: Arrowhead; arrowEnd: Arrowhead };
-export type EditorState = { ready: boolean; tool: Tool; zoom: number; selected: number; canUndo: boolean; canRedo: boolean; count: number; locked: boolean; snap: boolean; paint: Paint; selectionKind: string; guides: { x1: number; y1: number; x2: number; y2: number }[]; viewport: number[]; items: { id?: string; x: number; y: number; w: number; h: number }[] };
+export type EditorState = { ready: boolean; tool: Tool; zoom: number; selected: number; selectedIds: string[]; canUndo: boolean; canRedo: boolean; count: number; locked: boolean; snap: boolean; paint: Paint; selectionKind: string; guides: { x1: number; y1: number; x2: number; y2: number }[]; viewport: number[]; items: { id?: string; x: number; y: number; w: number; h: number }[] };
 export const INITIAL_PAINT: Paint = { color: '#1d1d1d', fill: 'none', size: 3.5, dash: 'draw', opacity: 1, font: FONTS[0].family, fontSize: 24, align: 'left', verticalAlign: 'middle', arrowStart: 'none', arrowEnd: 'arrow' };
-export const INITIAL_EDITOR: EditorState = { ready: false, tool: 'select', zoom: 1, selected: 0, canUndo: false, canRedo: false, count: 0, locked: false, snap: false, paint: INITIAL_PAINT, selectionKind: 'none', guides: [], viewport: [1, 0, 0, 1, 0, 0], items: [] };
+export const INITIAL_EDITOR: EditorState = { ready: false, tool: 'select', zoom: 1, selected: 0, selectedIds: [], canUndo: false, canRedo: false, count: 0, locked: false, snap: false, paint: INITIAL_PAINT, selectionKind: 'none', guides: [], viewport: [1, 0, 0, 1, 0, 0], items: [] };
 
 let sharedClipboard: FabricObject | null = null;
 
@@ -179,6 +179,19 @@ export class WhiteboardEngine {
   }
   setDark(value: boolean) { this.dark = value; this.syncLabels(); this.canvas.requestRenderAll(); }
   serialize(): Drawing { return { objects: JSON.parse(this.snapshot()).objects, viewport: [...this.canvas.viewportTransform] }; }
+  private sceneObjects(objects = this.canvas.getObjects()): FabricObject[] {
+    return objects.flatMap(object => object instanceof Group ? [object, ...this.sceneObjects(object.getObjects())] : [object]);
+  }
+  getSelectedIds(): string[] {
+    return [...new Set(this.sceneObjects(this.canvas.getActiveObjects()).filter(object => !(object instanceof Group) && !object.labelFor && object.id).map(object => object.id!))];
+  }
+  getSceneItems(): EditorState['items'] {
+    return this.sceneObjects().filter(object => !object.labelFor).map(object => { const b = object.getBoundingRect(); return { id: object.id, x: b.left, y: b.top, w: b.width, h: b.height }; });
+  }
+  commitTextEditing() {
+    if (this.closed || this.loading) throw new Error('Wait for this board to finish opening.');
+    for (const object of this.sceneObjects()) if (object instanceof IText && object.isEditing) object.exitEditing();
+  }
   private selectionPaint(): Paint {
     const object = this.canvas.getActiveObjects()[0];
     if (!object) return { ...this.paint };
@@ -197,7 +210,7 @@ export class WhiteboardEngine {
     if (this.closed) return;
     const active = this.canvas.getActiveObjects().filter(o => !o.labelFor), first = active[0];
     const kind = active.length > 1 ? 'mixed' : first instanceof MuzeNote ? 'note' : first instanceof IText ? 'text' : first instanceof MuzeArrow ? 'arrow' : first instanceof FabricImage ? 'image' : first ? 'shape' : 'none';
-    this.state({ ready: !this.loading, tool: this.tool, zoom: this.canvas.getZoom(), selected: active.length, canUndo: this.history.length > 1, canRedo: !!this.future.length, count: this.canvas.getObjects().filter(o => !o.labelFor).length, locked: this.locked, snap: this.snap, paint: this.selectionPaint(), selectionKind: kind, guides: this.guides, viewport: [...this.canvas.viewportTransform], items: this.canvas.getObjects().filter(o => !o.labelFor).map(object => { const b = object.getBoundingRect(); return { id: object.id, x: b.left, y: b.top, w: b.width, h: b.height }; }) });
+    this.state({ ready: !this.loading, tool: this.tool, zoom: this.canvas.getZoom(), selected: active.length, selectedIds: this.getSelectedIds(), canUndo: this.history.length > 1, canRedo: !!this.future.length, count: this.canvas.getObjects().filter(o => !o.labelFor).length, locked: this.locked, snap: this.snap, paint: this.selectionPaint(), selectionKind: kind, guides: this.guides, viewport: [...this.canvas.viewportTransform], items: this.getSceneItems() });
   }
   private publish() { if (this.loading || this.closed) return; this.changed(this.serialize()); this.emit(); }
   checkpoint() {
@@ -352,15 +365,37 @@ export class WhiteboardEngine {
     const object = new MuzeText(plain, { id: crypto.randomUUID(), left, top: center.y - 170, width: 520, autoWidth: false, fontFamily: FONTS[1].family, fontSize: 22, lineHeight: 1.3, fill: '#1d1d1d', muzeKind: 'text', objectCaching: false });
     this.canvas.add(object); this.setTool('select'); this.canvas.setActiveObject(object); this.assignFrames(); this.checkpoint(); this.fit(true);
   }
+  private placeWithoutOverlap(object: FabricObject, boxes: ReturnType<FabricObject['getBoundingRect']>[]) {
+    const original = object.getBoundingRect(), gap = 24;
+    const overlaps = (point: { left: number; top: number }) => boxes.some(box => point.left < box.left + box.width + 16 && point.left + original.width + 16 > box.left && point.top < box.top + box.height + 16 && point.top + original.height + 16 > box.top);
+    if (!overlaps(original)) return;
+    const nearest = [...boxes].sort((a, b) => Math.hypot(a.left - original.left, a.top - original.top) - Math.hypot(b.left - original.left, b.top - original.top)).slice(0, 64);
+    const extent = boxes.reduce((bounds, box) => ({ left: Math.min(bounds.left, box.left), top: Math.min(bounds.top, box.top), right: Math.max(bounds.right, box.left + box.width), bottom: Math.max(bounds.bottom, box.top + box.height) }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+    const candidates = [...nearest.flatMap(box => [
+      { left: box.left + box.width + gap, top: original.top }, { left: box.left - original.width - gap, top: original.top },
+      { left: original.left, top: box.top + box.height + gap }, { left: original.left, top: box.top - original.height - gap },
+    ]), { left: extent.right + gap, top: original.top }, { left: extent.left - original.width - gap, top: original.top }, { left: original.left, top: extent.bottom + gap }, { left: original.left, top: extent.top - original.height - gap }].filter(point => !overlaps(point));
+    const v = this.canvas.viewportTransform, zoom = this.canvas.getZoom();
+    const score = (point: { left: number; top: number }) => {
+      const left = point.left * zoom + v[4], top = point.top * zoom + v[5];
+      const outside = Math.max(0, 16 - left) + Math.max(0, left + original.width * zoom - this.canvas.width + 16) + Math.max(0, 100 - top) + Math.max(0, top + original.height * zoom - this.canvas.height + 140);
+      return Math.hypot(point.left - original.left, point.top - original.top) + outside / zoom;
+    };
+    const candidate = candidates.sort((a, b) => score(a) - score(b))[0];
+    if (!candidate) return;
+    let delta = new Point(candidate.left - original.left, candidate.top - original.top);
+    if (object.group) delta = delta.transform(util.invertTransform(object.group.calcTransformMatrix()), true);
+    object.set({ left: object.left + delta.x, top: object.top + delta.y }); object.setCoords();
+  }
   applyMuseActions(actions: MuseActions): MuseApplyResult {
     if (this.closed || this.loading || !this.enabled) return { ids: [], skipped: actions.cards.length + actions.updates.length+(actions.images?.length||0) };
     for(const image of actions.images||[])void this.addRemoteImage(image);
-    const c = this.canvas, changed: FabricObject[] = [];
+    const c = this.canvas, changed: FabricObject[] = [], focus = new Set(actions.focusIds || []);
     let skipped = 0;
     // Keep any newer text or active edits made while Muse was answering.
     for (const update of actions.updates) {
       const object = c.getObjects().find(item => item.id === update.id);
-      if (!(object instanceof IText) || object.isLocked || object.isEditing || object.isMoving || object.labelFor || object.text !== update.expectedText) { skipped++; continue; }
+      if (focus.size && !focus.has(update.id) || !(object instanceof IText) || object.isLocked || object.isEditing || object.isMoving || c._currentTransform || object.labelFor || object.text !== update.expectedText) { skipped++; continue; }
       const before = object.getBoundingRect();
       const previousLines = object.text.split('\n'), styles: typeof object.styles = {};
       update.text.split('\n').forEach((line, index) => { if (line === previousLines[index] && object.styles[index]) styles[index] = structuredClone(object.styles[index]); });
@@ -369,20 +404,14 @@ export class WhiteboardEngine {
       if (heading) object.setSelectionStyles(heading, 0, update.text.split('\n')[0].length);
       object.initDimensions(); this.growText(object);
       const after = object.getBoundingRect();
-      if (after.height > before.height + 1 && c.getObjects().some(other => {
-        if (other === object || other.labelFor || other.muzeKind === 'frame') return false;
-        const b = other.getBoundingRect();
-        return after.left < b.left + b.width && after.left + after.width > b.left && after.top < b.top + b.height && after.top + after.height > b.top;
-      })) {
-        const right = Math.max(...c.getObjects().filter(other => other !== object).map(other => { const b = other.getBoundingRect(); return b.left + b.width; }));
-        object.set('left', right + 48); object.setCoords();
-      }
+      if (after.height > before.height + 1 || after.width > before.width + 1) this.placeWithoutOverlap(object, c.getObjects().filter(other => other !== object && !other.labelFor && other.muzeKind !== 'frame').map(other => other.getBoundingRect()));
       changed.push(object);
     }
-    const center = this.center(), boxes = c.getObjects().map(object => object.getBoundingRect());
+    const center = this.center(), boxes = c.getObjects().filter(object => !object.labelFor && object.muzeKind !== 'frame').map(object => object.getBoundingRect());
+    const focusObjects = this.sceneObjects().filter(object => !!object.id && focus.has(object.id)), focusBoxes = focusObjects.map(object => object.getBoundingRect());
     const columns = c.width <= 700 ? 1 : 2, width = 360, gap = 48, organic=actions.layout!=='aligned';
-    const left = boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
-    let top = boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;
+    const left = focusBoxes.length ? Math.max(...focusBoxes.map(b => b.left + b.width)) + gap : boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
+    let top = focusBoxes.length ? Math.min(...focusBoxes.map(b => b.top)) : boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;
     for (const card of actions.cards) {
       if (c.getObjects().some(object => object.id === card.id)) continue;
       if (index && index % columns === 0) { top += rowHeight + gap; rowHeight = 0; }
@@ -390,13 +419,14 @@ export class WhiteboardEngine {
       object.setSelectionStyles({ fontWeight: 600, fontSize: 24 }, 0, card.title.length);
       object.initDimensions(); object.setCoords();
       // Keep rotated bounds clear of both existing work and this batch.
-      for(let attempt=0;attempt<100;attempt++){const bounds=object.getBoundingRect();if(!boxes.some(b=>bounds.left<b.left+b.width+16&&bounds.left+bounds.width+16>b.left&&bounds.top<b.top+b.height+16&&bounds.top+bounds.height+16>b.top))break;object.set('top',object.top+24);object.setCoords();}
+      this.placeWithoutOverlap(object, boxes);
       const bounds=object.getBoundingRect();boxes.push(bounds);
       c.add(object); changed.push(object); rowHeight = Math.max(rowHeight, bounds.top+bounds.height-top); index++;
     }
     if (changed.length) {
+      const selection = c.getActiveObject(); if (selection instanceof ActiveSelection) { selection.triggerLayout(); selection.setCoords(); }
       this.assignFrames(); this.connectors(); this.checkpoint();
-      this.scheduleFrame(changed, true);
+      if (index) this.scheduleFrame([...focusObjects, ...changed], true);
     }
     return { ids: changed.map(object => object.id!), skipped };
   }

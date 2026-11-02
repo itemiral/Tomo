@@ -2,10 +2,10 @@
 import {useEffect,useRef,useState} from 'react';
 import {useSession} from '@clerk/nextjs';
 import {getClientSessionToken,sessionTokenExpiration,useSupabaseClient} from '@/utils/supabase/client';
-import {presenceName,readCursor,readRoom,worldPoint,type BoardCursor,type BoardPerson,type CursorPosition} from './presence-state';
+import {museTargetId,presenceName,readCursor,readRoom,worldPoint,type BoardCursor,type BoardPerson,type CursorPosition} from './presence-state';
 import {reservePresenceUpdate} from './presence-schedule';
 
-type Options={boardId?:string;userId?:string;name:string;pageId?:string;viewport:number[];enabled:boolean;museWorking:boolean};
+type Options={boardId?:string;userId?:string;name:string;pageId?:string;viewport:number[];enabled:boolean;museWorking:boolean;museTargetId?:string};
 type RoomView={scope:string;peers:BoardPerson[];cursors:BoardCursor[];connected:boolean};
 export function useBoardPresence(options:Options){
  const {session}=useSession(),client=useSupabaseClient();
@@ -42,7 +42,10 @@ export function useBoardPresence(options:Options){
    pending={tabId,pageId:announced.pageId,x:point?.x??null,y:point?.y??null};
    if(cursorTimer)return;const wait=Math.max(0,50-(performance.now()-lastSent));if(wait===0)flushCursor();else cursorTimer=setTimeout(flushCursor,wait);
   };
-  const desired=():BoardPerson=>({userId:current.current.userId!,name:presenceName(current.current.name),tabId,pageId:current.current.pageId!,muse:current.current.museWorking?'working':'idle'});
+  const desired=():BoardPerson=>{
+   const target=current.current.museWorking?museTargetId(current.current.museTargetId):undefined;
+   return {userId:current.current.userId!,name:presenceName(current.current.name),tabId,pageId:current.current.pageId!,muse:current.current.museWorking?'working':'idle',...(target?{museTargetId:target}:{})};
+  };
   const scheduleTrack=(delay=100)=>{
    if(!authorized()||!joined||trackBusy||trackTimer)return;
    trackTimer=setTimeout(()=>{trackTimer=undefined;void track();},delay);
@@ -97,6 +100,6 @@ export function useBoardPresence(options:Options){
   window.addEventListener('pointermove',move,{capture:true,passive:true});window.addEventListener('pointerout',leave);window.addEventListener('blur',hide);document.addEventListener('visibilitychange',visibility);render();
   return()=>{cancelled=true;pointer=null;ready=false;if(roomRef.current===room)roomRef.current=null;clearInterval(refresh);clearInterval(keepalive);for(const timer of [cursorTimer,trackTimer,authRetry,tokenTimer,restartTimer])if(timer)clearTimeout(timer);window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerout',leave);window.removeEventListener('blur',hide);document.removeEventListener('visibilitychange',visibility);void client.removeChannel(channel);};
  },[scope,client,connection]);
- useEffect(()=>{const room=roomRef.current;if(room?.scope===scope)room.changed();},[scope,options.name,options.pageId,options.museWorking]);
+ useEffect(()=>{const room=roomRef.current;if(room?.scope===scope)room.changed();},[scope,options.name,options.pageId,options.museWorking,options.museTargetId]);
  return view.scope===scope&&scope?view:{scope,peers:[],cursors:[],connected:false};
 }

@@ -17,6 +17,11 @@
 .board-peer-muse.working .muse-orb{box-shadow:0 0 0 3px #5277ee20,0 5px 16px #5277ee30;border-color:#8999d5}
 .board-peer-muse small{font-size:9px;color:var(--muted);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .board-more-muses{font-size:10px;color:var(--muted);padding-bottom:8px}
+.board-muse-targets{position:absolute;inset:0;overflow:hidden;z-index:3;pointer-events:none}
+.board-muse-targets *{pointer-events:none}
+.board-muse-target-outline{position:absolute;border:1px solid currentColor;border-radius:12px;opacity:.65}
+.board-muse-target-avatar{position:absolute;display:grid;place-items:center;width:40px;height:40px;background:var(--panel);border:1px solid currentColor;border-radius:13px;box-shadow:0 2px 7px #202c3d12}
+.board-muse-target-avatar .board-peer-muse-icon{width:36px;height:36px;animation:none}
 @keyframes board-muse-float{50%{transform:translateY(-4px)}}
 @media(max-width:900px){.board-participants{top:52px;left:0;right:auto;max-width:calc(100vw - 210px)}.board-peer-muses{bottom:172px;gap:8px}.board-peer-muse{width:58px}.board-peer-muse>span{max-width:58px}}
 @media(prefers-reduced-motion:reduce){.board-peer-cursor{transition:none}.board-peer-muse-icon{animation:none}}

@@ -37,7 +37,7 @@ export async function museFixture(page: Page, initialNotes:Partial<Record<'soul'
   const notes = new Map<string, { content: string; revision: string; updatedAt: number }>();
   for(const [key,content] of Object.entries(initialNotes))notes.set('owner-a:'+key,{content,revision:'initial',updatedAt:Date.now()});
   const history = new Map<string, Message[]>();
-  let respond: (body: { message: string; board: string }) => Promise<MuseActions> = async () => ({ cards: [
+  let respond: (body: { message: string; board: string }) => Promise<MuseActions & {suggestions?:string[]}> = async () => ({ cards: [
     { id: 'muse-test-0', title: 'Set the direction', body: 'Choose a goal and define what success looks like.\n• Name the outcome\n• Set a useful deadline' },
     { id: 'muse-test-1', title: 'Make room for the work', body: 'Gather the people, time, and resources you need.\n• Keep the scope manageable\n• Choose the first step' },
     { id: 'muse-test-2', title: 'Check progress', body: 'Review what is working and adjust together.\n• Make decisions visible\n• Keep the next step clear' },
@@ -98,7 +98,7 @@ export async function museFixture(page: Page, initialNotes:Partial<Record<'soul'
       const actions = await respond(body);
       const messages: Message[] = [...(history.get(id) || []), { id: 'user-' + ++turn, role: 'user', content: body.message }, { id: 'assistant-' + turn, role: 'assistant', content: 'Prepared the next steps for your board.' }];
       history.set(id, messages);
-      return route.fulfill({ json: { messages, actions } }).catch(() => {});
+      return route.fulfill({ json: { messages, actions, suggestions:actions.suggestions||[] } }).catch(() => {});
     }
     return route.fulfill({ status: 404, json: { error: 'Not found' } });
   });

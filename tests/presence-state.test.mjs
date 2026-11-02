@@ -6,6 +6,12 @@ test('presence accepts only a bounded public description and drops private field
  const parsed=readPerson({...person,soul:'Private',memory:'Private',chat:['Private'],email:'private@example.test'});
  assert.deepEqual(parsed,person);assert.equal(readPerson({...person,muse:'Private thought'}),null);assert.equal(presenceName('x'.repeat(100)).length,40);assert.equal(presenceName('\u202eAda\u0000'),'Ada');
 });
+test('Muse targets contain only a bounded shared object ID while work is active',()=>{
+ const working={...person,muse:'working',museTargetId:'muse-turn-0'};
+ assert.deepEqual(readPerson({...working,request:'Private prompt',reasoning:'Private notes'}),working);
+ assert.deepEqual(readPerson({...person,museTargetId:'muse-turn-0'}),person);
+ for(const value of ['', 'x'.repeat(101), {text:'Private'}, 'a\nb', '<script>', '../../soul.md'])assert.equal(readPerson({...working,museTargetId:value}).museTargetId,undefined);
+});
 test('presence keys must match each tab and multiple tabs count as one person',()=>{
  const result=readRoom({tab_one:[person],tab_two:[{...person,tabId:'tab_two',muse:'working'}],wrong:[person]});
  assert.equal(result.length,2);assert.equal(uniquePeople(result).length,1);assert.equal(uniquePeople(result)[0].muse,'working');

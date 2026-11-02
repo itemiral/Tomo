@@ -9,7 +9,7 @@ import { MuseChat } from './chat';
 import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import './muse.css';
-type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(working:boolean)=>void;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
+type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:()=>Promise<string>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
@@ -17,21 +17,22 @@ export function MuseCompanion(props:Props) {
  if(!isLoaded||!isSignedIn||!user)return <div data-muse-ui="true" className="muse-interface"><FloatingMuse profileLoading={!isLoaded||!!isSignedIn} obstacles={props.obstacles} activity={{label:''}} open={()=>{if(isLoaded)clerk.openSignIn();}}/><div className="muse-chat-stack"><form className="muse-inline-guest" onSubmit={e=>{e.preventDefault();if(isLoaded)clerk.openSignIn();}}><input aria-label="Message Muse" placeholder="A thought, a question…" value={guestText} onChange={e=>setGuestText(e.target.value)} onKeyDown={e=>e.stopPropagation()}/><button aria-label="Send to Muse" disabled={!isLoaded}><ArrowUp size={17}/></button></form></div></div>;
  return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
-function OwnedMuse({attachImage,onActivity,appearanceSelected,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,applyActions,userId}:Props&{userId:string}) {
+function OwnedMuse({attachImage,onActivity,selectedIds,prepareContext,appearanceSelected,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,applyActions,userId}:Props&{userId:string}) {
  const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[avatarState,setAvatarState]=useState<AvatarState>('idle'),[chatOpen,setChatOpen]=useState(false),[avatarStatus,setAvatarStatus]=useState(''),[retryFile,setRetryFile]=useState<File|null>(null),[activity,setActivity]=useState<MuseActivity>({label:''});
  const iconBusy=avatarState==='pending',appearanceBox=obstacles.find(box=>box.id==='muse-appearance');
- const workingBox=!open&&activity.targetId?obstacles.find(box=>box.id===activity.targetId):undefined;
- useEffect(()=>{onActivity?.(!open&&!!activity.label);},[onActivity,open,activity.label]);
- useEffect(()=>()=>onActivity?.(false),[onActivity]);
+ const currentActivity=activity.thread===thread?activity:{label:''};
+ const workingBoxes=open?[]:obstacles.filter(box=>box.id&&(currentActivity.targetIds||[currentActivity.targetId]).includes(box.id));
+ useEffect(()=>{onActivity?.(!open&&activity.label&&activity.thread===thread?activity:{label:''});},[onActivity,open,activity,thread]);
+ useEffect(()=>()=>onActivity?.({label:''}),[onActivity]);
  useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
  const avatarRequest=useRef<AbortController|null>(null),lastOperation=useRef<string|null>(null);
  useEffect(()=>()=>avatarRequest.current?.abort(),[]);
- const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),workTimers=useRef<ReturnType<typeof setTimeout>[]>([]);
- const stopActivity=useCallback(()=>{workTimers.current.forEach(clearTimeout);workTimers.current=[];setActivity({label:''});},[]);
- const thinking=useCallback((value:boolean)=>{stopActivity();if(value)setActivity({label:'Thinking…'});},[stopActivity]);
+ const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),activityTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const stopActivity=useCallback(()=>{if(activityTimer.current)clearTimeout(activityTimer.current);activityTimer.current=null;setActivity({label:''});},[]);
+ const thinking=useCallback((value:boolean,focusIds:string[]=[])=>{stopActivity();if(value)setActivity({label:'Thinking…',targetId:focusIds[0],targetIds:focusIds,thread,ownerId:userId});},[stopActivity,thread,userId]);
  const clear=useCallback(()=>{ownerVersion.current++;setProfile(null);setChatOpen(false);setError('Sign in again to open your Muse.');},[]);
  useEffect(()=>{if(chatRequest)setChatOpen(chatRequest>0);},[chatRequest]);
- useEffect(()=>{stopActivity();return()=>workTimers.current.forEach(clearTimeout);},[thread,stopActivity]);
+ useEffect(()=>{stopActivity();return()=>{if(activityTimer.current)clearTimeout(activityTimer.current);};},[thread,stopActivity]);
  useEffect(()=>{const controller=new AbortController();void request<MuseProfile>('session',{signal:controller.signal}).then(v=>{if(!controller.signal.aborted&&v.ownerId===userId)setProfile(v);}).catch(e=>{if(!controller.signal.aborted)setError(e.message);});return()=>{controller.abort();ownerVersion.current++;};},[userId]);
   async function changeIcon(file: File, retry=false) {
     if(avatarRequest.current)return;
@@ -78,19 +79,18 @@ function OwnedMuse({attachImage,onActivity,appearanceSelected,openAppearance,app
   function apply(actions: MuseActions) {
     stopActivity();
     const result = applyActions(actions);
-    result.ids.forEach((id, index) => {
-      const show = () => setActivity({ label: 'Working here', targetId: id });
-      if (!index) show(); else workTimers.current.push(setTimeout(show, index * 1100));
-    });
-    if (result.ids.length) workTimers.current.push(setTimeout(() => setActivity({ label: '' }), result.ids.length * 1100 + 1600));
+    if (result.ids.length) {
+      setActivity({label:'',targetId:result.ids[0],targetIds:result.ids,thread,ownerId:userId});
+      activityTimer.current=setTimeout(stopActivity,1600);
+    }
     return result;
   }
 
  return <>
-  {workingBox&&<span className="muse-working-target" data-target-id={activity.targetId} aria-hidden="true" style={{left:workingBox.x-8,top:workingBox.y-8,width:workingBox.w+16,height:workingBox.h+16}}/>}
+  {workingBoxes.map(box=><span key={box.id} className={'muse-working-target'+(activity.label?'':' completed')} data-target-id={box.id} aria-hidden="true" style={{left:box.x-8,top:box.y-8,width:box.w+16,height:box.h+16}}/>)}
   <div data-muse-ui="true" className="muse-interface">
-  {!open && <FloatingMuse profile={profile} profileLoading={!profile} avatarPending={iconBusy} open={()=>onOpenChange(true)} changeAvatar={()=>{openAppearance?.();}} chat={()=>setChatOpen(true)} obstacles={obstacles} activity={activity} chatOpen={chatOpen}/>}
-  {profile && <div className="muse-chat-stack"><MuseChat attachImage={attachImage} key={thread} hidden={!chatOpen} expand={()=>setChatOpen(true)} beforeSend={beforeSend} profile={profile} thread={thread} boardContext={boardContext} close={()=>setChatOpen(false)} locked={clear} onThinking={thinking} applyActions={apply}/></div>}
+  {!open && <FloatingMuse profile={profile} profileLoading={!profile} avatarPending={iconBusy} open={()=>onOpenChange(true)} changeAvatar={()=>{openAppearance?.();}} chat={()=>setChatOpen(true)} obstacles={obstacles} activity={currentActivity} chatOpen={chatOpen}/>}
+  {profile && <div className="muse-chat-stack"><MuseChat attachImage={attachImage} key={thread} hidden={!chatOpen} expand={()=>setChatOpen(true)} beforeSend={beforeSend} prepareContext={prepareContext} selectedIds={selectedIds} profile={profile} thread={thread} boardContext={boardContext} close={()=>setChatOpen(false)} locked={clear} onThinking={thinking} applyActions={apply}/></div>}
   {open&&profile&&appearanceBox&&<AvatarFeedback box={appearanceBox} state={avatarState} selected={!!appearanceSelected} canRetry={!!retryFile} choose={()=>iconInput.current?.click()} retry={()=>{if(retryFile)void changeIcon(retryFile,true);else iconInput.current?.click();}}/>}
   <span className="muse-sr-only" id="avatar-replace-disclosure">Meta processes this image to generate and apply your avatar.</span>
   <span className="muse-sr-only" role="status" aria-live="polite">{avatarStatus}</span>

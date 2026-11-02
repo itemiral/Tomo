@@ -85,19 +85,24 @@ test('account changes clear private canvas and chat',async({page})=>{
 });
 
 test('Muse moves to its work, adds spaced editable notes, and returns to its resting spot', async ({ page }) => {
-  await museFixture(page);
+  const fixture=await museFixture(page);
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  fixture.response(async()=>{await gate;return {cards:[{id:'muse-test-0',title:'Direction',body:'Choose a goal.'},{id:'muse-test-1',title:'Resources',body:'Choose a first step.'},{id:'muse-test-2',title:'Review',body:'Check progress.'}],updates:[]};});
   const muse = page.getByRole('button', { name: 'Open Muse' });
   const initial = (await muse.boundingBox())!;
   await page.mouse.move(initial.x + 40, initial.y + 40); await page.mouse.down(); await page.mouse.move(410, 420, { steps: 10 }); await page.mouse.up();
   await expect.poll(async () => (await muse.boundingBox())!.x).toBeGreaterThan(300);
   await expect(page.locator('.muse-chat-messages')).toBeHidden();
   await chat(page); await send(page);
+  await expect(page.locator('.muse-floating')).toHaveClass(/working/);
+  release();
   await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
   await expect(page.getByText('Updated your board · Undo available', { exact: true })).toHaveCount(0);
   const plan = await exported(page);
   expect(plan.objects).toHaveLength(3);
   for (const [i, a] of plan.objects.entries()) for (const b of plan.objects.slice(i + 1)) expect(a.left + a.width <= b.left || b.left + b.width <= a.left || a.top + a.height <= b.top || b.top + b.height <= a.top).toBe(true);
-  await expect(page.locator('.muse-floating')).toHaveClass(/working/);
+  await expect(page.locator('.muse-floating')).not.toHaveClass(/working/);
   await page.screenshot({ path: 'verification/muze-collaboration.png' });
   await page.getByRole('button', { name: 'Close Muse chat' }).click();
   // Leave the character's hover area so its intentional hover pause can release.

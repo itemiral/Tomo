@@ -212,4 +212,10 @@
 .muse-avatar-feedback .muse-avatar-replace{right:50px}
 
 .muse-working-target{position:absolute;pointer-events:none;border:1px solid color-mix(in srgb,var(--blue) 65%,transparent);border-radius:12px;box-shadow:0 0 0 4px color-mix(in srgb,var(--blue) 8%,transparent);z-index:2}
+.muse-working-target.completed{animation:muse-change-highlight 1.6s ease-out forwards}
+@keyframes muse-change-highlight{0%,55%{opacity:1}100%{opacity:0}}
+.muse-next-moves{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 0}
+.muse-chat .muse-next-moves button{max-width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);font:12px/1.5 Inter,sans-serif;text-align:left;overflow-wrap:anywhere}
+.muse-chat .muse-next-moves button:hover:not(:disabled){background:var(--hover);border-color:var(--muted)}
+.muse-chat .muse-next-moves button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 @media(max-width:700px){.muze-style-panel.contextual:not(.show){display:none}.muse-chat-stack .muse-chat:not(.collapsed){max-height:min(40dvh,calc(100dvh - var(--toolbar-height,52px) - 180px))}.muse-floating{width:44px;height:44px;gap:0;justify-content:center}.muse-floating>.muse-avatar{width:40px;height:40px;border-radius:12px}.muse-floating-shadow{top:39px;width:24px;height:4px}.muse-floating-name,.muse-floating-activity{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
