@@ -8,6 +8,8 @@ export const maxDuration = 300;
 export async function GET(request: NextRequest) {
   try {
     return await withOwner(request, async profile => {
+      const expectedOwner = request.headers.get('x-muze-owner');
+      if (expectedOwner && expectedOwner !== profile.ownerId) return privateJson({ error: 'Your Muse account changed. Reload to continue.' }, 403);
       const operation = request.nextUrl.searchParams.get('operation');
       if (operation) return privateJson(await avatarOperation(profile.ownerId, operation));
       return withMuseProfileSnapshot(async () => {

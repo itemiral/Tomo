@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useClerk, useUser } from '@clerk/nextjs';
 import { ArrowUp } from 'lucide-react';
 import { museRequest as request, RequestError, type MuseProfile } from './shared';
@@ -8,32 +8,55 @@ import { AvatarFeedback, type AvatarState } from './avatar-feedback';
 import { MuseChat } from './chat';
 import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
+import { clearMusePreview, loadMusePreviewImage, musePortraitSource, readMusePreview, saveMusePreview, setMusePreviewOwner } from './preview-cache';
 import './muse.css';
 type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:()=>Promise<string>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
+ useLayoutEffect(()=>{if(isLoaded&&!isSignedIn)setMusePreviewOwner(null);},[isLoaded,isSignedIn]);
  useEffect(()=>{if(props.chatRequest>0&&isLoaded&&!isSignedIn)clerk.openSignIn();},[props.chatRequest]);
  if(!isLoaded||!isSignedIn||!user)return <div data-muse-ui="true" className="muse-interface"><FloatingMuse profileLoading={!isLoaded||!!isSignedIn} obstacles={props.obstacles} activity={{label:''}} open={()=>{if(isLoaded)clerk.openSignIn();}}/><div className="muse-chat-stack"><form className="muse-inline-guest" onSubmit={e=>{e.preventDefault();if(isLoaded)clerk.openSignIn();}}><input aria-label="Message Muse" placeholder="A thought, a question…" value={guestText} onChange={e=>setGuestText(e.target.value)} onKeyDown={e=>e.stopPropagation()}/><button aria-label="Send to Muse" disabled={!isLoaded}><ArrowUp size={17}/></button></form></div></div>;
  return <OwnedMuse key={user.id} {...props} userId={user.id}/>;
 }
 function OwnedMuse({attachImage,onActivity,selectedIds,prepareContext,appearanceSelected,openAppearance,appearanceChanged,open,onOpenChange,chatRequest,beforeSend,obstacles,thread,boardContext,applyActions,userId}:Props&{userId:string}) {
  const [profile,setProfile]=useState<MuseProfile|null>(null),[error,setError]=useState(''),[avatarState,setAvatarState]=useState<AvatarState>('idle'),[chatOpen,setChatOpen]=useState(false),[avatarStatus,setAvatarStatus]=useState(''),[retryFile,setRetryFile]=useState<File|null>(null),[activity,setActivity]=useState<MuseActivity>({label:''});
+ const profileRef=useRef(profile),profileRevision=useRef(0);profileRef.current=profile;
  const iconBusy=avatarState==='pending',appearanceBox=obstacles.find(box=>box.id==='muse-appearance');
  const currentActivity=activity.thread===thread?activity:{label:''};
  const workingBoxes=open?[]:obstacles.filter(box=>box.id&&(currentActivity.targetIds||[currentActivity.targetId]).includes(box.id));
  useEffect(()=>{onActivity?.(!open&&activity.label&&activity.thread===thread?activity:{label:''});},[onActivity,open,activity,thread]);
  useEffect(()=>()=>onActivity?.({label:''}),[onActivity]);
- useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail;if(detail.ownerId===userId)setProfile(p=>p?{...p,muse:{...p.muse,name:detail.name}}:p);};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
+ useEffect(()=>{const renamed=(event:Event)=>{const detail=(event as CustomEvent).detail,previous=profileRef.current;if(detail.ownerId===userId&&previous){profileRevision.current++;const next={...previous,muse:{...previous.muse,name:detail.name}};profileRef.current=next;saveMusePreview(userId,next);setProfile(next);}};window.addEventListener('muse-name-saved',renamed);return()=>window.removeEventListener('muse-name-saved',renamed);},[userId]);
  const avatarRequest=useRef<AbortController|null>(null),lastOperation=useRef<string|null>(null);
  useEffect(()=>()=>avatarRequest.current?.abort(),[]);
  const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),activityTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
  const stopActivity=useCallback(()=>{if(activityTimer.current)clearTimeout(activityTimer.current);activityTimer.current=null;setActivity({label:''});},[]);
  const thinking=useCallback((value:boolean,focusIds:string[]=[])=>{stopActivity();if(value)setActivity({label:'Thinking…',targetId:focusIds[0],targetIds:focusIds,thread,ownerId:userId});},[stopActivity,thread,userId]);
- const clear=useCallback(()=>{ownerVersion.current++;setProfile(null);setChatOpen(false);setError('Sign in again to open your Muse.');},[]);
+ const clear=useCallback(()=>{ownerVersion.current++;clearMusePreview(userId);setProfile(null);setChatOpen(false);setError('Sign in again to open your Muse.');},[userId]);
+ useLayoutEffect(()=>{setMusePreviewOwner(userId);const cached=readMusePreview(userId);if(cached){profileRef.current=cached;setProfile(cached);}},[userId]);
+ useEffect(()=>{const denied=(event:Event)=>{if((event as CustomEvent).detail?.ownerId===userId)clear();};window.addEventListener('muse-preview-denied',denied);return()=>window.removeEventListener('muse-preview-denied',denied);},[userId,clear]);
  useEffect(()=>{if(chatRequest)setChatOpen(chatRequest>0);},[chatRequest]);
  useEffect(()=>{stopActivity();return()=>{if(activityTimer.current)clearTimeout(activityTimer.current);};},[thread,stopActivity]);
- useEffect(()=>{const controller=new AbortController();void request<MuseProfile>('session',{signal:controller.signal}).then(v=>{if(!controller.signal.aborted&&v.ownerId===userId)setProfile(v);}).catch(e=>{if(!controller.signal.aborted)setError(e.message);});return()=>{controller.abort();ownerVersion.current++;};},[userId]);
+ useEffect(()=>{
+  const controller=new AbortController(),epoch=ownerVersion.current,revision=profileRevision.current;
+  const ownerActive=()=>!controller.signal.aborted&&epoch===ownerVersion.current;
+  const active=()=>ownerActive()&&revision===profileRevision.current;
+  void request<MuseProfile>('session',{signal:controller.signal}).then(async value=>{
+   if(!ownerActive())return;
+   if(value.ownerId!==userId){clear();return;}
+   if(!active())return;
+   const previous=profileRef.current;
+   if(previous&&value.muse.iconVersion&&musePortraitSource(previous)!==musePortraitSource(value)){
+    // Keep the verified owner's existing portrait until its replacement decodes.
+    try{await loadMusePreviewImage(userId,musePortraitSource(value));}catch{/* The verified profile still applies; the portrait handles a display failure. */}
+   }
+   if(!active())return;
+   saveMusePreview(userId,value);profileRef.current=value;setProfile(value);
+   if(value.muse.iconVersion)void loadMusePreviewImage(userId,musePortraitSource(value)).catch(()=>{});
+  }).catch(e=>{if(ownerActive()){if(e instanceof RequestError&&[401,403].includes(e.status))clear();else if(active())setError(e.message);}});
+  return()=>{controller.abort();ownerVersion.current++;};
+ },[userId,clear]);
   async function changeIcon(file: File, retry=false) {
     if(avatarRequest.current)return;
     const generation=ownerVersion.current,abort=new AbortController();avatarRequest.current=abort;
@@ -41,9 +64,22 @@ function OwnedMuse({attachImage,onActivity,selectedIds,prepareContext,appearance
     if(!retry){lastOperation.current=null;setRetryFile(null);}
     const apply=async(result:Partial<MuseProfile['muse']>)=>{
       if(generation!==ownerVersion.current||abort.signal.aborted)return;
-      await appearanceChanged?.();
+      // The server has committed the replacement. Invalidate old profile reads
+      // before optional display refreshes, which must never trigger regeneration.
+      profileRevision.current++;
+      try{await appearanceChanged?.();}catch(cause){if(cause instanceof RequestError&&[401,403].includes(cause.status)){clear();return;}}
       if(generation!==ownerVersion.current||abort.signal.aborted)return;
-      setProfile(p=>p?{...p,muse:{...p.muse,...result}}:p);
+      const previous=profileRef.current;
+      if(previous){
+        const appearance:Partial<MuseProfile['muse']>={};
+        for(const key of ['iconVersion','gazeVersion','candidateVersion'] as const)if(key in result)appearance[key]=result[key];
+        const preview={...previous,muse:{...previous.muse,...appearance}};
+        if(preview.muse.iconVersion)try{await loadMusePreviewImage(userId,musePortraitSource(preview));}catch{/* Generation already succeeded; a preview failure must not offer another paid attempt. */}
+        if(generation!==ownerVersion.current||abort.signal.aborted)return;
+        // A rename may have completed while the new pixels were loading.
+        const latest=profileRef.current;
+        if(latest){const next={...latest,muse:{...latest.muse,...appearance}};saveMusePreview(userId,next);profileRef.current=next;setProfile(next);}
+      }
       window.dispatchEvent(new CustomEvent('muse-appearance-saved',{detail:{ownerId:userId}}));
       setRetryFile(null);lastOperation.current=null;setAvatarState('idle');setAvatarStatus('Avatar updated.');
     };

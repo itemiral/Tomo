@@ -1,17 +1,18 @@
 'use client';
-import {useEffect,useRef} from 'react';
+import {useLayoutEffect,useRef} from 'react';
+import {cachedMusePreviewImage,loadMusePreviewImage} from './preview-cache';
 let pointerTracking=false;
 let lastPointer:{clientX:number;clientY:number}|null=null;
 // Hybrid: genuine generated poses plus rigid, time-smoothed motion. No mesh distortion or dynamic relighting.
-export function MusePortrait({src,sheet=false,poses=9,follow=false,onError,onLoad}:{src:string;sheet?:boolean;poses?:9|15;follow?:boolean;onError:()=>void;onLoad?:()=>void}) {
+export function MusePortrait({src,sheet=false,poses=9,follow=false,cacheOwner,onError,onLoad}:{src:string;sheet?:boolean;poses?:9|15;follow?:boolean;cacheOwner?:string;onError:()=>void;onLoad?:()=>void}) {
  const canvas=useRef<HTMLCanvasElement>(null),failure=useRef(onError),loaded=useRef(onLoad);failure.current=onError;loaded.current=onLoad;
- useEffect(()=>{
+ useLayoutEffect(()=>{
   if(!pointerTracking){pointerTracking=true;window.addEventListener('pointermove',event=>{if(event.pointerType!=='touch')lastPointer={clientX:event.clientX,clientY:event.clientY};},{passive:true});window.addEventListener('blur',()=>{lastPointer=null;});document.documentElement.addEventListener('pointerleave',()=>{lastPointer=null;});}
   const element=canvas.current,ctx=element?.getContext('2d');if(!element||!ctx)return;
   element.dataset.portraitReady='false';
   let closed=false,ready=false,frame=0,started=0,x=0,y=0,fromX=0,fromY=0,tx=0,ty=0,col=1,row=1,cell=poses===15?12:4;
   const frames:HTMLCanvasElement[]=[];
-  const media=matchMedia('(prefers-reduced-motion: reduce)'),image=new Image();
+  const media=matchMedia('(prefers-reduced-motion: reduce)');
   const sector=(value:number,current:number)=>value<-.38?0:value>.38?2:Math.abs(value)<.22?1:current;
   const draw=()=>{
    if(sheet&&poses===15){
@@ -35,7 +36,7 @@ export function MusePortrait({src,sheet=false,poses=9,follow=false,onError,onLoa
   const retarget=()=>{if(lastPointer)move(lastPointer);};
   const reposition=(event:TransitionEvent)=>{if(event.target instanceof Element&&event.target.contains(element))retarget();};
   const preference=()=>{if(media.matches)center();else retarget();};
-  image.onload=()=>{if(closed)return;
+  const renderImage=(image:HTMLImageElement)=>{if(closed)return;
    const columns=sheet?(poses===15?5:3):1,rows=sheet?3:1;
    for(let i=0;i<columns*rows;i++){
     // Separate textures prevent interpolation from sampling an adjacent pose.
@@ -52,9 +53,14 @@ export function MusePortrait({src,sheet=false,poses=9,follow=false,onError,onLoa
     const size=Math.min(sw,sh);sx+=(sw-size)/2;sy+=(sh-size)/2;
     target.drawImage(image,sx,sy,size,size,0,0,256,256);frames.push(texture);
    }
-   ready=true;retarget();fromX=x;fromY=y;started=performance.now();if(tx!==x||ty!==y)animate();draw();element.dataset.portraitReady='true';loaded.current?.();};image.onerror=()=>{if(!closed)failure.current();};image.src=src;
+   ready=true;retarget();fromX=x;fromY=y;started=performance.now();if(tx!==x||ty!==y)animate();draw();element.dataset.portraitReady='true';loaded.current?.();};
+  const failed=()=>{if(!closed)failure.current();};
+  const cached=cacheOwner?cachedMusePreviewImage(cacheOwner,src):null;
+  if(cached)renderImage(cached);
+  else if(cacheOwner&&src.startsWith('/api/muse/avatar?'))void loadMusePreviewImage(cacheOwner,src).then(renderImage,failed);
+  else{const image=new Image();image.onload=()=>renderImage(image);image.onerror=failed;image.src=src;}
   window.addEventListener('pointermove',move,{passive:true});window.addEventListener('resize',retarget);window.addEventListener('transitionrun',reposition);window.addEventListener('transitionend',reposition);window.addEventListener('transitioncancel',reposition);document.documentElement.addEventListener('pointerleave',neutral);window.addEventListener('blur',neutral);document.addEventListener('visibilitychange',neutral);media.addEventListener('change',preference);
   return()=>{closed=true;cancelAnimationFrame(frame);window.removeEventListener('pointermove',move);window.removeEventListener('resize',retarget);window.removeEventListener('transitionrun',reposition);window.removeEventListener('transitionend',reposition);window.removeEventListener('transitioncancel',reposition);document.documentElement.removeEventListener('pointerleave',neutral);window.removeEventListener('blur',neutral);document.removeEventListener('visibilitychange',neutral);media.removeEventListener('change',preference);};
- },[src,sheet,poses,follow]);
+ },[src,sheet,poses,follow,cacheOwner]);
  return <canvas ref={canvas} className="muse-portrait" width={256} height={256} data-portrait-source={src} data-portrait-ready="false" aria-hidden="true"/>;
 }
