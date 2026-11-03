@@ -60,3 +60,13 @@ test('editing one Soul preference does not freeze unrelated untouched default fa
   assert.match(result, /\nUse emojis\./);
   assert.match(result, /Give detailed explanations/);
 });
+
+test('expiry requires a real quoted date on a temporary board memory', () => {
+  const message = 'Keep this workshop budget through 2030-01-31.';
+  const proposal = update({ key: 'budget', target: 'memory', scope: 'board', evidence: message, expiresAt: '2030-01-31' });
+  assert.equal(parsePersonalization({ updates: [proposal] }, message).updates[0].expiresAt, '2030-01-31');
+  for (const extra of [{ scope: 'owner' }, { target: 'soul', key: 'detail' }, { expiresAt: '2030-02-30' }, { expiresAt: '2030-02-01' }, { operation: 'forget' }]) {
+    assert.deepEqual(parsePersonalization({ updates: [{ ...proposal, ...extra }] }, message).updates, []);
+  }
+  assert.match(selectPersonalizationContext({ ownerText: { soul: '', memory: '' }, entries: [], suppressed: [{ key: 'budget', target: 'memory', scope: 'board', deleted: true, expired: true }] }, message).instructions, /explicit renewal quoted from the current owner message/);
+});
