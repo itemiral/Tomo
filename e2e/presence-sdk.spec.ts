@@ -4,14 +4,14 @@ import { resolve } from 'node:path';
 
 const boardId = '8b72557c-0a22-4b39-b6fc-791d75cc2207';
 type Packet = { actor: string; at: number; event: string; action?: string; payload?: any };
-type Member = { socket: WebSocketRoute; actor: string; join: string; topic: string; key: string; presence?: Record<string, unknown> };
+type Member = { socket: WebSocketRoute; actor: string; join: string; topic: string; key: string; presence?: Record<string, unknown>; presenceRevision?:number };
 
 // Only the wire server and Clerk identity are fixtures. Supabase, its Phoenix
 // connection, binary broadcast codec, and the application hook are all real.
 function protocolServer({ rejectFirstTrack = false } = {}) {
   const members = new Map<WebSocketRoute, Member>(), packets: Packet[] = [], failures: string[] = [];
-  let now = 0, rejected = false;
-  const state = () => Object.fromEntries([...members.values()].filter(member => member.presence).map(member => [member.key, { metas: [{ ...member.presence, phx_ref: member.key }] }]));
+  let now = 0, rejected = false, dropActivity: string | null = null;
+  const state = () => Object.fromEntries([...members.values()].filter(member => member.presence).map(member => [member.key, { metas: [{ ...member.presence, phx_ref: member.key+':'+member.presenceRevision }] }]));
   const sync = () => { for (const member of members.values()) member.socket.send(JSON.stringify([member.join, null, member.topic, 'presence_state', state()])); };
   const close = (member: Member, reason: string) => {
     member.socket.send(JSON.stringify([member.join, null, member.topic, 'system', { status: 'error', message: reason }]));
@@ -20,6 +20,8 @@ function protocolServer({ rejectFirstTrack = false } = {}) {
   };
   return {
     packets, failures,
+    dropNextActivity(actor:string){dropActivity=actor;},
+    broadcast(event:string,payload:unknown) {for(const member of members.values())member.socket.send(JSON.stringify([member.join,null,member.topic,'broadcast',{type:'broadcast',event,payload}]));},
     close(actor: string) { const member = [...members.values()].find(member => member.actor === actor); if (!member) throw new Error('Member not connected'); close(member, 'Server channel restart'); },
     async advance(pages: Page[], milliseconds: number) { now += milliseconds; await Promise.all(pages.map(page => page.clock.fastForward(milliseconds))); },
     attach(page: Page, actor: string) {
@@ -47,10 +49,11 @@ function protocolServer({ rejectFirstTrack = false } = {}) {
             if (attempts.length > 5) { failures.push('ClientPresenceRateLimitReached'); close(member, 'ClientPresenceRateLimitReached'); return; }
             if (payload.event === 'track') {
               if (rejectFirstTrack && !rejected && actor === 'owner') { rejected = true; reply('error', { reason: 'Temporary presence failure' }); return; }
-              member.presence = payload.payload;
+              member.presence = payload.payload; member.presenceRevision=(member.presenceRevision||0)+1;
             } else delete member.presence;
             reply(); sync();
           } else if (event === 'broadcast') {
+            if(payload.event==='activity'&&dropActivity===actor){dropActivity=null;reply();return;}
             for (const member of members.values()) if (member.socket !== socket) {
               // Deliver kind-4 binary messages to exercise the real receive codec too.
               const topicBytes = Buffer.from(member.topic), eventBytes = Buffer.from(payload.event), content = Buffer.from(JSON.stringify(payload.payload));
@@ -74,9 +77,9 @@ function bundle() {
       import{useBoardPresence}from'./src/components/muze/use-board-presence';
       import{BoardParticipants,BoardPeerCursors}from'./src/components/muze/board-presence';
       import'./src/app/globals.css';import'./src/components/muze/whiteboard.css';
-      function App(){const[options,setOptions]=useState({pageId:'page-one',museWorking:false,enabled:true});window.sdkSetOptions=patch=>setOptions(value=>({...value,...patch}));window.sdkOptions=options;
-        const state=useBoardPresence({...options,boardId:'${boardId}',userId:window.sdkActor,name:window.sdkActor==='owner'?'Ada':'Bo',viewport:[1,0,0,1,0,0]});window.sdkPresence=state;
-        return <main className="muze-app"><div className="muze-drawing-surface" style={{position:'fixed',inset:0}}/><BoardParticipants peers={state.peers} userId={window.sdkActor} connected={state.connected}/><BoardPeerCursors cursors={state.cursors} pageId={options.pageId} viewport={[1,0,0,1,0,0]}/></main>;
+      function App(){const[options,setOptions]=useState({pageId:'page-one',museWorking:false,enabled:true,viewport:[1,0,0,1,0,0]});window.sdkSetOptions=patch=>setOptions(value=>({...value,...patch}));window.sdkOptions=options;
+        const state=useBoardPresence({...options,boardId:'${boardId}',userId:window.sdkActor,name:window.sdkActor==='owner'?'Ada':'Bo'});window.sdkPresence=state;
+        return <main className="muze-app"><div className="muze-drawing-surface" style={{position:'fixed',inset:0}}/><BoardParticipants peers={state.peers} userId={window.sdkActor} connected={state.connected}/><BoardPeerCursors cursors={state.cursors} pageId={options.pageId} viewport={options.viewport}/></main>;
       }createRoot(document.getElementById('root')).render(<App/>);
     ` },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', outdir: '/tmp/muze-presence-sdk-fixture', external: ['/fonts/*'],
@@ -103,9 +106,9 @@ async function fixture(browser: Browser, server: ReturnType<typeof protocolServe
   await page.goto('/__presence-sdk');
   return { context, page };
 }
-async function options(page: Page, patch: { pageId?: string; museWorking?: boolean }) {
+async function options(page: Page, patch: { pageId?: string; museWorking?: boolean; museTargetId?: string; viewport?: number[] }) {
   await page.evaluate(patch => (window as any).sdkSetOptions(patch), patch);
-  await expect.poll(() => page.evaluate(patch => Object.entries(patch).every(([key, value]) => (window as any).sdkOptions[key] === value), patch)).toBe(true);
+  await expect.poll(() => page.evaluate(patch => Object.entries(patch).every(([key, value]) => JSON.stringify((window as any).sdkOptions[key]) === JSON.stringify(value)), patch)).toBe(true);
 }
 const tracks = (server: ReturnType<typeof protocolServer>, actor = 'owner') => server.packets.filter(packet => packet.actor === actor && packet.event === 'presence');
 
@@ -187,4 +190,89 @@ test('token refresh does not publish unchanged presence metadata', async ({ brow
     await expect(page.getByLabel('People on this board')).toContainText('You');
     expect(server.failures).toEqual([]);
   } finally { await context.close(); }
+});
+
+
+test('page and Muse targets reach peers promptly after the presence track budget is exhausted', async ({browser}) => {
+  const server=protocolServer(), contexts:BrowserContext[]=[];
+  try {
+    const owner=await fixture(browser,server,'owner');contexts.push(owner.context);
+    const guest=await fixture(browser,server,'guest');contexts.push(guest.context);
+    await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+    for(let index=0;index<3;index++) {
+      await server.advance([owner.page,guest.page],2100);
+      await options(owner.page,{museWorking:index%2===0});
+      await server.advance([owner.page,guest.page],150);
+      await expect.poll(()=>tracks(server).length).toBe(index+2);
+    }
+    await options(owner.page,{pageId:'page-two',museWorking:true,museTargetId:'shared-note'});
+    await server.advance([owner.page,guest.page],250);
+    await expect.poll(()=>guest.page.evaluate(()=>(window as any).sdkPresence.peers.find((peer:any)=>peer.userId==='owner'))).toMatchObject({pageId:'page-two',muse:'working',museTargetId:'shared-note'});
+    expect(tracks(server)).toHaveLength(4);expect(server.failures).toEqual([]);
+  } finally {await Promise.all(contexts.map(context=>context.close()));}
+});
+
+test('a stationary cursor returns after its owner reconnects without another pointer move', async ({browser})=>{
+  const server=protocolServer(),contexts:BrowserContext[]=[];
+  try {
+    const owner=await fixture(browser,server,'owner');contexts.push(owner.context);
+    const guest=await fixture(browser,server,'guest');contexts.push(guest.context);
+    await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+    await owner.page.mouse.move(470,330);await expect(guest.page.getByLabel('Ada’s cursor',{exact:true})).toBeVisible();
+    server.close('owner');await expect(guest.page.getByLabel('Ada’s cursor',{exact:true})).toHaveCount(0);
+    await server.advance([owner.page,guest.page],12000);
+    await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+    await expect(guest.page.getByLabel('Ada’s cursor',{exact:true})).toBeVisible();
+    await expect.poll(()=>guest.page.evaluate(()=>(window as any).sdkPresence.cursors.find((cursor:any)=>cursor.userId==='owner')?.x)).toBe(470);
+  } finally {await Promise.all(contexts.map(context=>context.close()));}
+});
+
+test('panning under a stationary pointer updates the shared world position promptly',async({browser})=>{
+  const server=protocolServer(),contexts:BrowserContext[]=[];
+  try {
+    const owner=await fixture(browser,server,'owner');contexts.push(owner.context);
+    const guest=await fixture(browser,server,'guest');contexts.push(guest.context);
+    await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+    await owner.page.mouse.move(500,350);await expect(guest.page.getByLabel('Ada’s cursor',{exact:true})).toBeVisible();
+    await options(owner.page,{viewport:[2,0,0,2,100,50]});
+    await server.advance([owner.page,guest.page],150);
+    expect(await guest.page.evaluate(()=>(window as any).sdkPresence.cursors.find((cursor:any)=>cursor.userId==='owner'))).toMatchObject({x:200,y:150});
+  } finally {await Promise.all(contexts.map(context=>context.close()));}
+});
+
+
+test('activity updates are ordered, survive membership sync, and ignore unknown tabs',async({browser})=>{
+ const server=protocolServer(),contexts:BrowserContext[]=[];
+ try{
+  const owner=await fixture(browser,server,'owner');contexts.push(owner.context);
+  const guest=await fixture(browser,server,'guest');contexts.push(guest.context);
+  await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+  await server.advance([owner.page,guest.page],250);
+  const person=await guest.page.evaluate(()=>(window as any).sdkPresence.peers.find((peer:any)=>peer.userId==='owner'));
+  server.broadcast('activity',{tabId:person.tabId,pageId:'page-two',muse:'working',museTargetId:'shared-note',revision:10});
+  await expect.poll(()=>guest.page.evaluate(()=>(window as any).sdkPresence.peers.find((peer:any)=>peer.userId==='owner')?.pageId)).toBe('page-two');
+  server.broadcast('activity',{tabId:person.tabId,pageId:'page-one',muse:'idle',revision:9});
+  server.broadcast('activity',{tabId:'unknown-tab',pageId:'page-two',muse:'working',revision:99});
+  await options(guest.page,{museWorking:true});await server.advance([owner.page,guest.page],2500);
+  const peers=await guest.page.evaluate(()=>(window as any).sdkPresence.peers);
+  expect(peers).toHaveLength(2);expect(peers.find((peer:any)=>peer.userId==='owner')).toMatchObject({pageId:'page-two',muse:'working',museTargetId:'shared-note'});
+  expect(peers.some((peer:any)=>peer.tabId==='unknown-tab')).toBe(false);
+ }finally{await Promise.all(contexts.map(context=>context.close()));}
+});
+
+
+test('a newer membership snapshot recovers work status when an activity broadcast is lost',async({browser})=>{
+ const server=protocolServer(),contexts:BrowserContext[]=[];
+ try{
+  const owner=await fixture(browser,server,'owner');contexts.push(owner.context);
+  const guest=await fixture(browser,server,'guest');contexts.push(guest.context);
+  await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+  await server.advance([owner.page,guest.page],250);
+  server.dropNextActivity('owner');await options(owner.page,{museWorking:true,museTargetId:'shared-note'});
+  await server.advance([owner.page,guest.page],2500);
+  await expect.poll(()=>guest.page.evaluate(()=>(window as any).sdkPresence.peers.find((peer:any)=>peer.userId==='owner'))).toMatchObject({muse:'working',museTargetId:'shared-note'});
+  server.dropNextActivity('owner');await options(owner.page,{museWorking:false});
+  await server.advance([owner.page,guest.page],2500);
+  await expect.poll(()=>guest.page.evaluate(()=>(window as any).sdkPresence.peers.find((peer:any)=>peer.userId==='owner')?.muse)).toBe('idle');
+ }finally{await Promise.all(contexts.map(context=>context.close()));}
 });

@@ -1,4 +1,5 @@
-export type BoardPerson = {userId:string;name:string;tabId:string;pageId:string;muse:'idle'|'working';museTargetId?:string};
+export type BoardPerson = {userId:string;name:string;tabId:string;pageId:string;muse:'idle'|'working';museTargetId?:string;activityRevision?:number};
+export type BoardActivity = Pick<BoardPerson,'tabId'|'pageId'|'muse'|'museTargetId'> & {revision:number};
 export type CursorPosition = {tabId:string;pageId:string;x:number|null;y:number|null};
 export type BoardCursor = BoardPerson & {x:number;y:number;receivedAt:number};
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
@@ -8,7 +9,13 @@ export function presenceName(value:unknown){return typeof value==='string'?value
 export function readPerson(value:unknown):BoardPerson|null{
   if(!record(value)||!id(value.userId)||!id(value.tabId)||!id(value.pageId)||!['idle','working'].includes(String(value.muse)))return null;
   const target=value.muse==='working'?museTargetId(value.museTargetId):undefined;
-  return {userId:value.userId,name:presenceName(value.name),tabId:value.tabId,pageId:value.pageId,muse:value.muse as BoardPerson['muse'],...(target?{museTargetId:target}:{})};
+  const revision=Number.isSafeInteger(value.activityRevision)&&(value.activityRevision as number)>0?value.activityRevision as number:undefined;
+  return {userId:value.userId,name:presenceName(value.name),tabId:value.tabId,pageId:value.pageId,muse:value.muse as BoardPerson['muse'],...(target?{museTargetId:target}:{}),...(revision?{activityRevision:revision}:{})};
+}
+export function readActivity(value:unknown):BoardActivity|null{
+  if(!record(value)||!id(value.tabId)||!id(value.pageId)||!['idle','working'].includes(String(value.muse))||!Number.isSafeInteger(value.revision)||(value.revision as number)<1)return null;
+  const target=value.muse==='working'?museTargetId(value.museTargetId):undefined;
+  return {tabId:value.tabId,pageId:value.pageId,muse:value.muse as BoardPerson['muse'],revision:value.revision as number,...(target?{museTargetId:target}:{})};
 }
 export function readCursor(value:unknown):CursorPosition|null{
   if(!record(value)||!id(value.tabId)||!id(value.pageId))return null;

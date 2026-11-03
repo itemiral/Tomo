@@ -138,9 +138,9 @@ test('late joiners see stationary cursors and keepalives preserve them until the
   await fixture(bo,bus,'bo');await expect(bo.getByLabel('People on this board')).toContainText('Ada');
   await ada.clock.runFor(3100);const cursor=bo.getByLabel('Ada’s cursor',{exact:true});await expect(cursor).toBeVisible();
   // A connected peer keeps its last position even when no cursor heartbeat arrives.
-  const cursorMessages=bus.messages.filter(message=>message.operation==='broadcast').length;
+  const cursorMessages=bus.messages.filter(message=>message.operation==='broadcast'&&message.event==='cursor').length;
   await bo.clock.runFor(16000);await expect(cursor).toBeVisible();
-  expect(bus.messages.filter(message=>message.operation==='broadcast')).toHaveLength(cursorMessages);
+  expect(bus.messages.filter(message=>message.operation==='broadcast'&&message.event==='cursor')).toHaveLength(cursorMessages);
   for(let interval=0;interval<5;interval++){await ada.clock.runFor(3000);await bo.clock.runFor(3000);await expect(cursor).toBeVisible();}
   await ada.getByRole('button',{name:'Pan and zoom',exact:true}).focus();await ada.keyboard.press('Enter');await ada.clock.runFor(3100);
   await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(840);await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(620);
@@ -216,7 +216,7 @@ test('Muse targets are public metadata only and page changes, private notebooks,
     for (const payload of payloads) {
       expect(JSON.stringify(payload)).not.toMatch(/SECRET_|soul|memory|chat|prompt|reply|api.?key/i);
       expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThan(1024);
-      expect(Object.keys(payload).every(key => ['userId', 'name', 'tabId', 'pageId', 'muse', 'museTargetId', 'x', 'y', 'updatedAt', 'sentAt', 'ts'].includes(key))).toBe(true);
+      expect(Object.keys(payload).every(key => ['userId', 'name', 'tabId', 'pageId', 'muse', 'museTargetId', 'x', 'y', 'updatedAt', 'sentAt', 'ts', 'revision', 'activityRevision'].includes(key))).toBe(true);
     }
   } finally { await a.close(); await b.close(); }
 });

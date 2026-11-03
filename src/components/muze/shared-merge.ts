@@ -1,4 +1,4 @@
-import type { Board } from './storage';
+import type { Board, Drawing } from './storage';
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export function equalBoardValues(a: unknown, b: unknown): boolean {
@@ -19,6 +19,10 @@ function merge(base: unknown, local: unknown, remote: unknown): unknown {
   if (equal(remote, base) || equal(local, remote)) return local;
   if (Array.isArray(base) && Array.isArray(local) && Array.isArray(remote) && identified(base) && identified(local) && identified(remote)) {
     const previous = new Map(base.map(item => [item.id, item])), ours = new Map(local.map(item => [item.id, item])), theirs = new Map(remote.map(item => [item.id, item]));
+    const common = new Set(base.filter(item => ours.has(item.id) && theirs.has(item.id)).map(item => item.id));
+    const order = (items: typeof base) => items.filter(item => common.has(item.id)).map(item => item.id);
+    const originalOrder = order(base), ourOrder = order(local), theirOrder = order(remote);
+    if (!equal(originalOrder, ourOrder) && !equal(originalOrder, theirOrder) && !equal(ourOrder, theirOrder)) throw new BoardConflict();
     const baseOrder = base.filter(item => ours.has(item.id)).map(item => item.id);
     const localOrder = local.filter(item => previous.has(item.id)).map(item => item.id);
     const ordered = equal(baseOrder, localOrder) ? [...remote, ...local] : [...local, ...remote];
@@ -36,10 +40,14 @@ function merge(base: unknown, local: unknown, remote: unknown): unknown {
   throw new BoardConflict();
 }
 
+export function mergeSharedDrawing(base: Drawing, local: Drawing, remote: Drawing): Drawing {
+  return {objects: merge(base.objects, local.objects, remote.objects) as Drawing['objects'], viewport: local.viewport};
+}
+
 // Navigation belongs to each browser, even when the drawing is shared.
 export function sceneContent(board: Board) {
   const { activePage: _activePage, ...value } = board;
-  return {...value, pages: board.pages.map(({viewport: _viewport, ...page}) => page)};
+  return {...value, comments: board.comments || [], pages: board.pages.map(({viewport: _viewport, ...page}) => page)};
 }
 export const sameScene = (a: Board, b: Board) => equal(sceneContent(a), sceneContent(b));
 export function mergeSharedBoard(base: Board, local: Board, remote: Board): Board {

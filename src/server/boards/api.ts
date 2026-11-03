@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAuthenticatedClient, SupabaseSessionError } from '@/utils/supabase/shared';
 import { checkOrigin, jsonBody, PrivateError } from '@/server/muse/private';
-import { BOARD_BODY_LIMIT, boardId, boardRevision, inviteToken, sharedBoard } from './validation';
+import { BOARD_BODY_LIMIT, boardId, boardRevision, inviteToken, sharedBoard, readSharedBoard } from './validation';
 
 const headers = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' };
 export const boardJson = (data: unknown, status = 200) => NextResponse.json(data, { status, headers });
@@ -30,7 +30,7 @@ async function context(request: NextRequest, mutation = false) {
 function snapshot(value: unknown) {
   const data = value as { board?: { id?: unknown }; revision?: unknown; role?: unknown };
   if (!data || !['owner', 'editor'].includes(String(data.role))) throw new PrivateError(503, 'This board could not be read.');
-  return { board: sharedBoard(data.board, boardId(data.board?.id)), revision: boardRevision(data.revision), role: data.role as 'owner' | 'editor' };
+  return { board: readSharedBoard(data.board, boardId(data.board?.id)), revision: boardRevision(data.revision), role: data.role as 'owner' | 'editor' };
 }
 type Client = ReturnType<typeof createAuthenticatedClient>;
 async function write(client: Client, args: Record<string, unknown>) {

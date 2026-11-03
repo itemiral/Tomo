@@ -5,6 +5,11 @@ type Shape = { fontFamily?: string; fontSize?: number; fontWeight?: string; auto
 type BoardFile = { format: string; board: { name: string; activePage: string; pages: { id: string; name: string; objects: Shape[]; viewport: number[] }[] } };
 const shapes = (file: BoardFile) => file.board.pages.find(p => p.id === file.board.activePage)!.objects;
 async function ready(page: Page) { await page.goto('/'); await expect(page.getByRole('button', { name: 'Draw', exact: true })).toBeVisible(); await expect(page.locator('canvas.upper-canvas')).toBeVisible(); await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true'); if((page.viewportSize()?.width||1440)>700)await page.getByRole('button',{name:'Styles',exact:true}).click(); }
+async function chooseStyle(page: Page, name: string) {
+  const control = page.getByRole('button', { name, exact: true });
+  if (!await control.isVisible()) await page.getByRole('button', { name: 'Styles', exact: true }).click();
+  await control.click();
+}
 async function stroke(page: Page, tool: string, from = { x: 300, y: 240 }, to = { x: 520, y: 400 }) {
   if (tool === 'Eraser') await page.getByRole('button', { name: 'More tools', exact: true }).click();
   await page.getByRole('button', { name: tool, exact: true }).click();
@@ -41,7 +46,7 @@ test('draws shapes, connected arrows, handwriting, editable text and notes on ou
 
 test('styles, moves, resizes, duplicates, groups, undoes and erases canvas objects', async ({ page }) => {
   await ready(page); await stroke(page, 'Rectangle');
-  await page.getByRole('button', { name: 'Red', exact: true }).click(); await page.getByRole('button', { name: 'Solid fill', exact: true }).click();
+  await page.getByRole('button', { name: 'Red', exact: true }).click(); await chooseStyle(page, 'Solid fill');
   let objects = shapes((await save(page)).board); expect(objects[0].stroke).toBe('#e03131');
   await page.mouse.move(410, 300); await page.mouse.down(); await page.mouse.move(530, 380, { steps: 10 }); await page.mouse.up();
   objects = shapes((await save(page)).board); expect(objects[0].left).toBeGreaterThan(400); expect(objects[0].top).toBeGreaterThan(300);
@@ -113,7 +118,7 @@ test('offers the extra drawing tools and a phone layout with reachable controls'
 test('keeps connectors attached after moving shapes and gives duplicated groups new identities', async ({ page }) => {
   await ready(page);
   await stroke(page, 'Rectangle', { x: 250, y: 220 }, { x: 440, y: 350 });
-  await page.getByRole('button', { name: 'Soft fill', exact: true }).click();
+  await chooseStyle(page, 'Soft fill');
   await stroke(page, 'Rectangle', { x: 700, y: 220 }, { x: 890, y: 350 });
   await stroke(page, 'Arrow', { x: 345, y: 285 }, { x: 795, y: 285 });
   const before = shapes((await save(page)).board).find(o => o.type === 'MuzeArrow')!;
@@ -149,7 +154,7 @@ test('matches the measured type widths and line heights for all four fonts and s
   for (const [fontIndex, font] of ['Draw', 'Sans', 'Serif', 'Mono'].entries()) {
     await page.getByRole('button', { name: font + ' font', exact: true }).click();
     for (const [sizeIndex, size] of ['S', 'M', 'L', 'XL'].entries()) {
-      await page.getByRole('button', { name: size + ' stroke size', exact: true }).click();
+      await chooseStyle(page, size + ' stroke size');
       const text = shapes((await save(page)).board)[0];
       expect(text.fontSize).toBe([18, 24, 36, 44][sizeIndex]);
       expect(text.height).toBe([24, 32, 49, 59][sizeIndex]);
@@ -157,8 +162,10 @@ test('matches the measured type widths and line heights for all four fonts and s
     }
   }
   await page.getByRole('button', { name: 'Draw font', exact: true }).click();
-  await page.getByRole('button', { name: 'M stroke size', exact: true }).click();
-  await page.keyboard.press('Enter'); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText('First line\nSecond line'); await page.keyboard.press('Escape');
+  await chooseStyle(page, 'M stroke size');
+  await page.mouse.dblclick(220, 230);
+  const textInput = page.locator('textarea[data-fabric="textarea"]');
+  await expect(textInput).toBeAttached(); await textInput.fill('First line\nSecond line'); await textInput.press('Escape');
   expect(shapes((await save(page)).board)[0].height).toBe(64);
   await page.screenshot({ path: 'verification/muze-typography.png' });
 });
@@ -192,7 +199,7 @@ test('centers notes at the cursor and reflects selected fonts, size, and colors'
   await ready(page); await page.getByRole('button', { name: 'Note', exact: true }).click(); await page.mouse.click(500, 350);
   await page.keyboard.insertText('A note with a next step'); await page.keyboard.press('Escape');
   let note = shapes((await save(page)).board)[0]; expect(note).toMatchObject({ left: 400, top: 250, width: 200, height: 200, textAlign: 'center', fontFamily: 'Shantell Sans', fontSize: 22 });
-  await page.getByRole('button', { name: 'Serif font', exact: true }).click(); await page.getByRole('button', { name: 'L stroke size', exact: true }).click(); await page.getByRole('button', { name: 'Blue', exact: true }).click();
+  await page.getByRole('button', { name: 'Serif font', exact: true }).click(); await chooseStyle(page, 'L stroke size'); await page.getByRole('button', { name: 'Blue', exact: true }).click();
   await stroke(page, 'Rectangle', { x: 800, y: 300 }, { x: 1000, y: 450 });
   await page.getByRole('button', { name: 'Red', exact: true }).click();
   await page.mouse.click(500, 350);
@@ -214,6 +221,7 @@ test('reshapes arrows with their handles and preserves curved connectors and arr
   await ready(page); await stroke(page, 'Arrow', { x: 300, y: 300 }, { x: 700, y: 300 });
   await page.mouse.move(500, 300); await page.mouse.down(); await page.mouse.move(500, 420, { steps: 15 }); await page.mouse.up();
   let arrow = shapes((await save(page)).board)[0]; expect(Math.abs(arrow.bend || 0)).toBeGreaterThan(100);
+  await page.getByRole('button', { name: 'Styles', exact: true }).click();
   await page.getByLabel('Arrow end', { exact: true }).selectOption('triangle');
   await page.mouse.move(700, 300); await page.mouse.down(); await page.mouse.move(820, 230, { steps: 15 }); await page.mouse.up();
   arrow = shapes((await save(page)).board)[0]; expect(arrow.arrowEnd).toBe('triangle'); expect(arrow.width).toBeGreaterThan(500);

@@ -72,7 +72,7 @@ function ToolButton({ tool, current, choose, compact }: { tool: Tool; current: T
   return <Button label={value.name} hint={value.hint} shortcut={value.key} active={current === tool} onClick={() => choose(tool)} className={compact ? 'tool-compact' : ''} data-testid={'tool-' + tool}><Icon size={20} strokeWidth={1.65}/></Button>;
 }
 
-function DrawingSurface({ drawing, pageId, changed, update, ready, report }: { drawing: Drawing; pageId: string; changed: (drawing: Drawing) => void; update: (state: EditorState) => void; ready: (engine: WhiteboardEngine | null) => void; report: (message: string) => void }) {
+function DrawingSurface({ drawing, pageId, ownerId, changed, update, ready, report }: { drawing: Drawing; pageId: string; ownerId?: string; changed: (drawing: Drawing, previous?: Drawing, source?: {pageId: string;ownerId?: string}) => void; update: (state: EditorState) => void; ready: (engine: WhiteboardEngine | null) => void; report: (message: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef({ changed, update, ready, report }); callbacks.current = { changed, update, ready, report };
   const [laser, setLaser] = useState<{ x: number; y: number } | null>(null);
@@ -81,7 +81,7 @@ function DrawingSurface({ drawing, pageId, changed, update, ready, report }: { d
     vector.className = 'muze-vector-surface'; host.current!.append(vector);
     canvas.setAttribute('aria-label', 'Whiteboard drawing canvas'); canvas.setAttribute('role', 'img');
     holder.append(canvas); host.current!.append(holder);
-    const engine = new WhiteboardEngine(canvas, value => callbacks.current.changed(value), value => callbacks.current.update(value), value => callbacks.current.report(value));
+    const engine = new WhiteboardEngine(canvas, (value, previous) => callbacks.current.changed(value, previous, {pageId,ownerId}), value => callbacks.current.update(value), value => callbacks.current.report(value));
     let previous = '';
     engine.onRender = svg => { if (svg !== previous) { vector.innerHTML = svg; previous = svg; } };
     let mounted = true;
@@ -92,7 +92,7 @@ function DrawingSurface({ drawing, pageId, changed, update, ready, report }: { d
     return () => { mounted = false; clearTimeout(timer); callbacks.current.ready(null); engine.dispose(); holder.remove(); vector.remove(); };
     // Each page owns a canvas instance; edits flow out without reloading it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageId]);
+  }, [pageId,ownerId]);
   return <div ref={host} className="muze-drawing-surface">{laser && <span className="muze-laser" style={{ left: laser.x, top: laser.y }}/>}</div>;
 }
 
@@ -121,7 +121,7 @@ export default function MuzeEditor() {
   const [museActivity,setMuseActivity] = useState<MuseActivity>({label:''});
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const current = useRef<Workspace | null>(null), db = useRef<IDBDatabase | null>(null);
-  const shared = useSharedBoard(isSignedIn ? user?.id : undefined, () => !engine.current || engine.current.canReceiveSharedChanges());
+  const shared = useSharedBoard(isSignedIn ? user?.id : undefined, () => !engine.current || engine.current.canReceiveSharedChanges(true));
   const sharedRef=useRef(shared);sharedRef.current=shared;
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
   const updateEditor = useCallback((value: EditorState) => { setEditor(value); setPaint(value.paint); }, []);
@@ -171,7 +171,14 @@ export default function MuzeEditor() {
     const value = current.current; if (!value) return;
     commit({ ...value, boards: value.boards.map(board => board.id === value.activeBoard ? update(board) : board) });
   }, [commit, museCanvas.update]);
-  const changeDrawing = useCallback((drawing: Drawing) => updateBoard(board => ({ ...board, pages: board.pages.map(p => p.id === board.activePage ? { ...p, ...drawing } : p) })), [updateBoard]);
+  const changeDrawing = useCallback((drawing: Drawing, previous?: Drawing, source?: {pageId:string;ownerId?:string}) => {
+    const board = museActive.current ? privateBoardRef.current : sharedRef.current.board || current.current?.boards.find(board => board.id === current.current?.activeBoard);
+    if (!board || source && (source.ownerId !== currentOwner.current || source.pageId !== board.id + board.activePage)) return;
+    if (!museActive.current && sharedRef.current.board) {
+      sharedRef.current.updateDrawing(sharedRef.current.board.activePage, drawing, previous); return;
+    }
+    updateBoard(board => ({ ...board, pages: board.pages.map(p => p.id === board.activePage ? { ...p, ...drawing } : p) }));
+  }, [updateBoard]);
   const mount = useCallback((value: WhiteboardEngine | null) => { engine.current = value; if (value) { value.onComment=point=>setCommentPlacement({...point,nonce:Date.now()}); value.setEnabled(true); value.paint = { ...INITIAL_PAINT }; value.setDark(dark); value.grid = grid; setPaint(INITIAL_PAINT); } }, [dark, grid]);
   useEffect(() => { setPopup(null); setStylesOpen(false); }, [museOpen]);
   useEffect(() => { setMuseOpen(false); }, [user?.id]);
@@ -279,7 +286,7 @@ export default function MuzeEditor() {
     else if (/\.(muze|json)$/i.test(file.name)) await openFile(file);
     else setToast('This file type is not supported. Add a picture, Markdown, text, or Muze file. Audio, video and PDFs need a written description.');
   }
-  useEffect(()=>{if(!museOpen&&shared.board&&page)void engine.current?.applySharedDrawing(page).catch(()=>setToast('Could not display the latest board changes. Reload this board.'));},[shared.board,page,museOpen]);
+  useEffect(()=>{if(!museOpen&&shared.board&&page)void engine.current?.applySharedDrawing(page,true).catch(error=>setToast(error instanceof Error ? error.message : 'Could not display the latest board changes. Reload this board.'));},[shared.board,page,museOpen]);
   useLayoutEffect(()=>{
     if(!museOpen||!museCanvas.refreshVersion)return;
     let cancelled=false,timer:ReturnType<typeof setTimeout>;
@@ -332,7 +339,7 @@ export default function MuzeEditor() {
     <CanvasTooltips/>
     <div className="muze-board-layer">
     {grid && <svg className="muze-grid" aria-hidden="true"><defs><pattern id="muze-grid-dots" patternUnits="userSpaceOnUse" x={gridDots.x} y={gridDots.y} width={gridDots.spacing} height={gridDots.spacing}><circle cx={gridDots.spacing / 2} cy={gridDots.spacing / 2} r="1" fill="var(--grid-dot)"/></pattern></defs><rect width="100%" height="100%" fill="url(#muze-grid-dots)"/></svg>}
-    <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>
+    <DrawingSurface key={active.id + page.id} pageId={active.id + page.id} ownerId={user?.id} drawing={page} changed={changeDrawing} update={updateEditor} ready={mount} report={setToast}/>
     {editor.guides.length > 0 && <svg className="muze-snap-guides" aria-hidden="true"><g transform={`translate(${editor.viewport[4]} ${editor.viewport[5]}) scale(${editor.zoom})`}>{editor.guides.map((line, index) => <line key={index} {...line} stroke="#e44b7a" strokeWidth={1 / editor.zoom} strokeDasharray={`${4 / editor.zoom} ${4 / editor.zoom}`}/>)}</g></svg>}
     <header className="muze-header">
       {!museOpen&&shared.board&&<BoardParticipants profiles={participantProfiles} peers={presence.peers} userId={user?.id} connected={presence.connected}/>}

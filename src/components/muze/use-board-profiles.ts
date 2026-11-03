@@ -26,7 +26,7 @@ export function useBoardProfiles(options:Options){
   const read=()=>{
    readPending=true;if(!active()||reading||document.hidden)return;
    reading=true;readPending=false;const startedAt=publication;let failed=false;
-   void fetch(url,{cache:'no-store',signal:abort.signal}).then(responseProfiles).then(value=>{
+   void fetch(url,{cache:'no-store',signal:AbortSignal.any([abort.signal,AbortSignal.timeout(15000)])}).then(responseProfiles).then(value=>{
     // A read begun before a successful publish must not restore its old avatar.
     if(active()&&startedAt===publication){readRevision++;apply(value);}
    }).catch(()=>{failed=true;}).finally(()=>{reading=false;if(active()&&readPending&&!failed&&!document.hidden)read();});
@@ -34,7 +34,7 @@ export function useBoardProfiles(options:Options){
   const publish=()=>{
    if(!active()||publishing||!publishPending||document.hidden)return;
    publishing=true;publishPending=false;const startedAt=readRevision;let failed=false;
-   void fetch(url,{method:'POST',cache:'no-store',signal:abort.signal}).then(responseProfiles).then(value=>{
+   void fetch(url,{method:'POST',cache:'no-store',signal:AbortSignal.any([abort.signal,AbortSignal.timeout(15000)])}).then(responseProfiles).then(value=>{
     publication++;
     // The publish response may have been delayed behind a newer peer read.
     // Its own profile is acknowledged, but it must not roll other Muses back.
