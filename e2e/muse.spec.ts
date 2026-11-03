@@ -305,7 +305,14 @@ test('anchored comments follow pan and zoom, persist, edit, cancel and reopen on
   pin=page.locator('[data-comment-id="'+comment.id+'"]');await pin.click();await expect(dialog).toContainText('Revised anchored thought '+special);await page.mouse.click(700,100);await expect(dialog).toBeHidden();
   await pin.click();await page.screenshot({path:'verification/anchored-comments-'+(special?'muse':'ordinary')+'.png'});await page.keyboard.press('Escape');
   if(special){
-   await page.setViewportSize({width:390,height:844});const position=(await pin.boundingBox())!;await page.mouse.move(200,300);await page.mouse.wheel(position.x+position.width/2-160,position.y+position.height/2-300);await pin.click();await page.screenshot({path:'verification/anchored-comments-mobile.png'});await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'Back to whiteboard'}).click();
+   await page.setViewportSize({width:390,height:844});
+   await expect.poll(()=>page.locator('.upper-canvas').evaluate(canvas=>canvas.getBoundingClientRect().width)).toBe(390);
+   // Mobile framing is scheduled after ResizeObserver over two animation frames.
+   // Measure the pin after that viewport change, before calculating a pan delta.
+   await page.evaluate(()=>new Promise<void>(resolve=>{let frames=4;const next=()=>--frames?requestAnimationFrame(next):resolve();requestAnimationFrame(next);}));
+   const position=(await pin.boundingBox())!;await page.mouse.move(200,300);await page.mouse.wheel(position.x+position.width/2-160,position.y+position.height/2-300);
+   await expect.poll(async()=>{const box=await pin.boundingBox();return box?Math.abs(box.x+box.width/2-160)+Math.abs(box.y+box.height/2-300):Infinity;}).toBeLessThan(2);
+   await pin.click();await page.screenshot({path:'verification/anchored-comments-mobile.png'});await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'Back to whiteboard'}).click();
   }
  }
 });
@@ -353,7 +360,7 @@ test('More stays anchored and preserves document drafts with keyboard and narrow
   if(special)await openMuseEditor(page);
   await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
   const doc=(await exported(page)).objects.find(o=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'))!,bounds=(await page.locator('.muze-vector-surface [id="'+doc.id+'"]').boundingBox())!;await page.mouse.dblclick(bounds.x+60,bounds.y+70);await page.locator('textarea[data-fabric="textarea"]').fill('Draft stays here');
-  const more=page.getByRole('button',{name:'More tools',exact:true});await more.click();const panel=page.getByRole('toolbar',{name:'More drawing tools'});await expect(panel).toBeVisible();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('button').nth(2)).toBeFocused();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(more).toBeFocused();expect((await exported(page)).text).toContain('Draft stays here');
+  const more=page.getByRole('button',{name:'More tools',exact:true});await more.click();const panel=page.getByRole('toolbar',{name:'More drawing tools'});await expect(panel).toBeVisible();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('button').nth(1)).toBeFocused();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(more).toBeFocused();expect((await exported(page)).text).toContain('Draft stays here');
   await page.setViewportSize({width:390,height:844});await page.getByRole('textbox',{name:'Message Muse'}).fill('A thought while choosing tools');await more.click();const p=(await panel.boundingBox())!;expect(p.x).toBeGreaterThanOrEqual(0);expect(p.x+p.width).toBeLessThanOrEqual(390);expect(p.y).toBeGreaterThanOrEqual(70);await expect.poll(async()=>{const panelBox=(await panel.boundingBox())!,chatBox=(await page.locator('.muse-chat-stack').boundingBox())!;return chatBox.y+chatBox.height<panelBox.y;}).toBe(true);await page.screenshot({path:'verification/more-'+(special?'muse':'ordinary')+'-mobile.png'});
   await page.mouse.click(370,100);await expect(panel).toBeHidden();await more.click();await page.getByRole('button',{name:'Comment',exact:true}).click();await expect(panel).toBeHidden();await page.mouse.click(200,300);await expect(page.getByRole('dialog',{name:'Canvas comment'})).toBeVisible();await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:900});
  }

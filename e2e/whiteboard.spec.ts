@@ -13,7 +13,7 @@ async function stroke(page: Page, tool: string, from = { x: 300, y: 240 }, to = 
 async function save(page: Page) {
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
-  await page.getByRole('menuitem', { name: 'Muze file', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Save editable copy (.muze)', exact: true }).click();
   const file = await pending, bytes = await readFile((await file.path())!);
   return { filename: file.suggestedFilename(), bytes, board: JSON.parse(bytes.toString()) as BoardFile };
 }
