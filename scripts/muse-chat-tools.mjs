@@ -7,8 +7,22 @@ import {importImage} from './muse-image-import.mjs';
 import {imageLinks} from './muse-tasks.mjs';
 
 export function toolIntent(message){
+ const text=message.replace(/[’‘]/g,"'");
+ const offline=/\b(?:do not|don't|dont|never|avoid|skip|no need to)\s+(?:please\s+)?(?:search(?:ing)?|look(?:ing)?\s*up|brows(?:e|ing)|research(?:ing)?|(?:use|using)\s+(?:the\s+)?(?:web|internet|online))\b|\b(?:no|without)\s+(?:web(?:\s+search)?|internet|online\s+(?:search|research)|browsing|research|search(?:ing)?|looking\s*up)\b|\b(?:stay|work|remain|answer|keep it)\s+offline\b|\boffline\s+only\b|\b(?:(?:use|using)\s+(?:only|just)|only\s+use)\s+(?:(?:my|our|the|these|those|selected)\s+)?(?:notes|cards|board|text|documents?|selection)\b/i.test(text);
+ if(offline)return {images:false,search:false};
+ // Route public fact requests without requiring the person to name a search tool.
+ // Local edits and preferences are not permission to send notebook text to search.
+ const localEdit=/^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:rewrite|rephrase|shorten|translate|format|rename|move|resize|delete)\b/i.test(text);
+ const localEvidence=/\b(?:from|in|using|based on|according to)\s+(?:(?:just|only)\s+)?(?:these|those|my|our|the|selected)\s+(?:notes|cards|board|text|documents?|selection|table)\b/i.test(text);
+ const preference=/^(?:(?:please\s+)?remember\s+(?:that\s+)?)?(?:I|we)\s+(?:prefer|like|love|usually|always|never)\b/i.test(text);
+ const explicitSearch=/\b(?:search|look\s*up|browse|research)\b/i.test(text);
+ const request=/\b(?:find|check|compare|show|tell me|give me|get|fetch|recommend|suggest)\b|^(?:please\s+)?(?:what|which|where|when|how|is|are|does|do|can|could|would)\b/i.test(text);
+ const currentFact=/\b(?:latest|current|today|live|real[- ]time|up[- ]to[- ]date)\b/i.test(text);
+ const marketFact=/\b(?:prices?|costs?|fares?|rates?|availability|available|flights?|hotels?|tickets?)\b|\bin stock\b|\bopening hours\b/i.test(text);
+ const publicBrief=/^(?:latest|current|live|up[- ]to[- ]date)\b/i.test(text);
+ if(localEdit||preference||localEvidence&&!explicitSearch)return {images:false,search:false};
  const images=/\b(?:add|insert|find|fetch|get|show|search|put|place|bring)\b[\s\S]*\b(?:images?|photos?|pictures?)\b|\b(?:images?|photos?|pictures?)\b[\s\S]*\b(?:on|onto|to)\s+(?:the |my )?board\b/i.test(message)||imageLinks(message).length>0;
- return {images,search:/\b(?:search|look\s*up|browse|research|latest|current|today|web)\b/i.test(message)};
+ return {images,search:explicitSearch||publicBrief||request&&(currentFact||marketFact)};
 }
 const plain=value=>String(value||'').replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim().slice(0,500);
 export async function findCommonsImage(message,signal,fetcher=fetch,importer=importImage){
