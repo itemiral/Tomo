@@ -60,8 +60,8 @@ export function describeMuseCanvas(board) {
       else if(typeof o.markdown==='string') entry.markdown=o.markdown.replace(/data:[^\s)]+/g,'[embedded data is not sent]');
       else if(typeof o.text==='string') entry.text=o.text.replace(/data:[^\s)]+/g,'[embedded data is not sent]');
       if(o.id==='muse-appearance') entry.role='Muse appearance reference; swapping uses the avatar upload action';
-      if(type==='Image') entry.status='Private image: pixels not sent or interpreted; any nearby caption is user-provided context';
-      else if(type==='Path') {entry.status='Drawing: geometry only, no visual interpretation';entry.stroke=o.stroke;entry.pathSegments=Array.isArray(o.path)?o.path.length:0;}
+      if(type==='Image') entry.status='Private image: this notebook summary provides metadata and nearby captions, not pixels';
+      else if(type==='Path') {entry.status='Drawing: geometry only in this notebook summary';entry.stroke=o.stroke;entry.pathSegments=Array.isArray(o.path)?o.path.length:0;}
       else if(type==='Group') entry.status='Group; members listed separately';
       else {entry.shape=o.geo||o.muzeKind||type; if(o.fill)entry.fill=o.fill;if(o.stroke)entry.stroke=o.stroke;}
       if(o.labelFor)entry.labelFor=o.labelFor;
@@ -71,7 +71,7 @@ export function describeMuseCanvas(board) {
     });
     return {name:page.name,objects};
   });
-  return JSON.stringify({name:board.name,pages,comments:board.comments||[],mediaPolicy:'Image pixels are not included in this context. Geometry descriptions are not pixel understanding.'});
+  return JSON.stringify({name:board.name,pages,comments:board.comments||[],mediaPolicy:'This notebook summary contains no image pixels. Relevant images or rendered board regions may be attached separately to the current request; only those attachments support visual observations.'});
 }
 export async function saveMuseCanvas(owner,body) {
   await ensureMuse(owner);

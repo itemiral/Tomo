@@ -8,9 +8,10 @@ import { AvatarFeedback, type AvatarState } from './avatar-feedback';
 import { MuseChat } from './chat';
 import { FloatingMuse, type Obstacle, type MuseActivity } from './floating';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
+import { museProgressLabel, type MusePreparedContext, type MuseProgress } from '@/lib/muse-request';
 import { clearMusePreview, loadMusePreviewImage, musePortraitSource, readMusePreview, saveMusePreview, setMusePreviewOwner } from './preview-cache';
 import './muse.css';
-type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:()=>Promise<string>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
+type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:(message?:string,signal?:AbortSignal)=>Promise<string|MusePreparedContext>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
@@ -32,7 +33,7 @@ function OwnedMuse({attachImage,onActivity,selectedIds,prepareContext,appearance
  useEffect(()=>()=>avatarRequest.current?.abort(),[]);
  const ownerVersion=useRef(0),iconInput=useRef<HTMLInputElement>(null),activityTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
  const stopActivity=useCallback(()=>{if(activityTimer.current)clearTimeout(activityTimer.current);activityTimer.current=null;setActivity({label:''});},[]);
- const thinking=useCallback((value:boolean,focusIds:string[]=[])=>{stopActivity();if(value)setActivity({label:'Thinking…',targetId:focusIds[0],targetIds:focusIds,thread,ownerId:userId});},[stopActivity,thread,userId]);
+ const thinking=useCallback((value:boolean,focusIds:string[]=[],phase:MuseProgress='thinking')=>{stopActivity();if(value)setActivity({label:museProgressLabel[phase],targetId:focusIds[0],targetIds:focusIds,thread,ownerId:userId});},[stopActivity,thread,userId]);
  const clear=useCallback(()=>{ownerVersion.current++;clearMusePreview(userId);setProfile(null);setChatOpen(false);setError('Sign in again to open your Muse.');},[userId]);
  useLayoutEffect(()=>{setMusePreviewOwner(userId);const cached=readMusePreview(userId);if(cached){profileRef.current=cached;setProfile(cached);}},[userId]);
  useEffect(()=>{const denied=(event:Event)=>{if((event as CustomEvent).detail?.ownerId===userId)clear();};window.addEventListener('muse-preview-denied',denied);return()=>window.removeEventListener('muse-preview-denied',denied);},[userId,clear]);

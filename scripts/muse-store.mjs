@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, stat, writeFile, withStorageTransaction
 import { join } from 'node:path';
 import { digest, privateDirectory } from './muse-local.mjs';
 import { MUSE_NOTE_TEMPLATES } from './muse-defaults.mjs';
+import { retrievalTerms, filterAdd } from './muse-retrieval.mjs';
 
 export const NOTE_LIMIT = 512_000;
 const templates = MUSE_NOTE_TEMPLATES;
@@ -112,10 +113,10 @@ export async function readMuseChat(ownerId, thread) {
 export async function saveMuseChat(ownerId, thread, messages) {
   return withMuseOwner(ownerId, () => saveMuseConversationUnlocked(ownerId, thread, messages));
 }
-const archiveTerms = messages => {
+const archiveIndex = messages => {
   const counts = new Map();
-  for (const message of messages) for (const term of (message.content.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,31}/gu) || [])) counts.set(term, (counts.get(term) || 0) + 1);
-  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 64).map(([term]) => term);
+  for (const message of messages) for (const term of retrievalTerms(message.content)) counts.set(term, (counts.get(term) || 0) + 1);
+  return { terms: [...counts].sort((a, b) => b[1] - a[1]).slice(0, 256).map(([term]) => term), termFilter: filterAdd(null, counts.keys()), termsVersion: 2 };
 };
 // Call under the owner transaction when committing a turn and its private notes.
 export async function saveMuseConversationUnlocked(ownerId, thread, messages, extra = {}) {
@@ -128,7 +129,10 @@ export async function saveMuseConversationUnlocked(ownerId, thread, messages, ex
     if (!message || typeof message.id !== 'string' || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || seen.has(message.id)) return false;
     seen.add(message.id); return true;
   });
-  const overflow = combined.slice(0, Math.max(0, combined.length - 32));
+  let split = Math.max(0, combined.length - 32);
+  // Keep a user request with its response at the recent/archive boundary.
+  while (split > 0 && combined[split]?.role === 'assistant') split--;
+  const overflow = combined.slice(0, split);
   const archives = [...current.archives];
   let archiveCount = current.archiveCount || 0;
   while (overflow.length) {
@@ -138,15 +142,20 @@ export async function saveMuseConversationUnlocked(ownerId, thread, messages, ex
       catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
     if (chunk.length >= 128) { index = archiveCount; chunk = []; }
-    chunk.push(...overflow.splice(0, 128 - chunk.length));
+    let count = Math.min(overflow.length, 128 - chunk.length);
+    while (count > 0 && overflow[count]?.role === 'assistant') count--;
+    if (!count) { index = archiveCount; chunk = []; count = Math.min(128, overflow.length); while (count > 0 && overflow[count]?.role === 'assistant') count--; }
+    // Legacy imports can contain unusually long runs; preserve their bytes.
+    if (!count) count = Math.min(128, overflow.length);
+    chunk.push(...overflow.splice(0, count));
     await replaceFile(chatArchivePath(ownerId, thread, index), JSON.stringify(chunk));
     archiveCount = Math.max(archiveCount, index + 1);
-    const descriptor = { index, count: chunk.length, terms: archiveTerms(chunk) };
+    const descriptor = { index, count: chunk.length, ...archiveIndex(chunk) };
     const previous = archives.findIndex(item => item.index === index);
     if (previous === -1) archives.push(descriptor); else archives[previous] = descriptor;
   }
   const recentMessageIds = [...new Set([...previousIds, ...combined.map(message => message.id)])].slice(-512);
-  const result = { ...current, ...extra, version: 2, messages: combined.slice(-32), recentMessageIds, archiveCount, archives: archives.slice(-256) };
+  const result = { ...current, ...extra, version: 2, messages: combined.slice(split), recentMessageIds, archiveCount, archives: archives.slice(-256) };
   await replaceFile(threadPath(ownerId, thread), JSON.stringify(result));
   return result;
 }
