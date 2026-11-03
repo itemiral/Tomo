@@ -183,6 +183,23 @@ export class WhiteboardEngine {
   }
   setDark(value: boolean) { this.dark = value; this.syncLabels(); this.canvas.requestRenderAll(); }
   serialize(): Drawing { return { objects: JSON.parse(this.snapshot()).objects, viewport: [...this.canvas.viewportTransform] }; }
+  captureMuseRegion(ids: string[] = []): string | undefined {
+    if (this.closed || this.loading) return;
+    const c = this.canvas, viewport = [...c.viewportTransform] as TMat2D, dark = this.dark;
+    const requested = new Set(ids), objects = this.sceneObjects().filter(object => object.id && requested.has(object.id));
+    const boxes = objects.map(object => object.getBoundingRect());
+    const zoom = c.getZoom();
+    const left = boxes.length ? Math.min(...boxes.map(box => box.left)) - 24 : -viewport[4] / zoom;
+    const top = boxes.length ? Math.min(...boxes.map(box => box.top)) - 24 : -viewport[5] / zoom;
+    const width = boxes.length ? Math.max(...boxes.map(box => box.left + box.width)) - left + 24 : c.width / zoom;
+    const height = boxes.length ? Math.max(...boxes.map(box => box.top + box.height)) - top + 24 : c.height / zoom;
+    if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+    try {
+      this.dark = false; this.exporting = true;
+      c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      return c.toDataURL({ format: 'png', left, top, width, height, multiplier: Math.min(1, 1024 / Math.max(width, height)), enableRetinaScaling: false });
+    } finally { this.dark = dark; this.exporting = false; c.setViewportTransform(viewport); c.requestRenderAll(); }
+  }
   private sceneObjects(objects = this.canvas.getObjects()): FabricObject[] {
     return objects.flatMap(object => object instanceof Group ? [object, ...this.sceneObjects(object.getObjects())] : [object]);
   }
@@ -412,7 +429,8 @@ export class WhiteboardEngine {
       changed.push(object);
     }
     const center = this.center(), boxes = c.getObjects().filter(object => !object.labelFor && object.muzeKind !== 'frame').map(object => object.getBoundingRect());
-    const focusObjects = this.sceneObjects().filter(object => !!object.id && focus.has(object.id)), focusBoxes = focusObjects.map(object => object.getBoundingRect());
+    const anchor = focus.size ? focus : new Set(actions.anchorIds || []);
+    const focusObjects = this.sceneObjects().filter(object => !!object.id && anchor.has(object.id)), focusBoxes = focusObjects.map(object => object.getBoundingRect());
     const columns = c.width <= 700 ? 1 : 2, width = 360, gap = 48, organic=actions.layout!=='aligned';
     const left = focusBoxes.length ? Math.max(...focusBoxes.map(b => b.left + b.width)) + gap : boxes.length ? Math.max(...boxes.map(b => b.left + b.width)) + 80 : center.x - (columns * (width + gap) - gap) / 2;
     let top = focusBoxes.length ? Math.min(...focusBoxes.map(b => b.top)) : boxes.length ? Math.min(...boxes.map(b => b.top)) : center.y - 240, rowHeight = 0, index = 0;

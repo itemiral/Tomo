@@ -4,12 +4,14 @@ import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {build} from 'esbuild';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
 import {pathToFileURL} from 'node:url';
 const dir=await mkdtemp(join(tmpdir(),'muse-tasks-'));process.env.MUZE_PRIVATE_DIR=join(dir,'private');
 const {createTask,readTask,changeTask}=await import('../scripts/muse-tasks.mjs');
 const {researchGoal,publicUrl}=await import('../scripts/muse-research.mjs');
 const {publicAddress}=await import('../scripts/muse-image-import.mjs');
-const bundle=await build({entryPoints:['src/server/muse/tasks.ts'],bundle:true,write:false,platform:'node',format:'esm',plugins:[{name:'server-test',setup(b){b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:''}));b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));}}]});await writeFile(join(dir,'tasks.mjs'),bundle.outputFiles[0].text);const {taskAction}=await import(pathToFileURL(join(dir,'tasks.mjs')));
+const bundle=await build({entryPoints:['src/server/muse/tasks.ts'],bundle:true,write:false,platform:'node',format:'esm',plugins:[{name:'server-test',setup(b){b.onResolve({filter:/^sharp$/},()=>({path:require.resolve('sharp'),external:true}));b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:''}));b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));}}]});await writeFile(join(dir,'tasks.mjs'),bundle.outputFiles[0].text);const {taskAction}=await import(pathToFileURL(join(dir,'tasks.mjs')));
 after(()=>rm(dir,{recursive:true,force:true}));
 test('new tasks include research when omitted or explicitly enabled',async()=>{
  const signal=new AbortController().signal;

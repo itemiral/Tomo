@@ -132,7 +132,7 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
   const gate = new Promise<void>(resolve => { release = resolve; });
   fixture.response(async () => { await gate; return { cards: [], updates: [{ id: first.id, text: 'Muse revision', expectedText: first.text }, { id: second.id, text: 'Updated resources\n\nBring a notebook.', expectedText: second.text }] }; });
   await send(page, 'Refine this plan');
-  await expect(page.getByText('Muse is thinking', { exact: true })).toBeVisible();
+  await expect(page.locator('.muse-chat-thinking')).toBeVisible();
   const [zoom, , , , x, y] = plan.viewport;
   await page.mouse.dblclick(first.left * zoom + x + 70, first.top * zoom + y + 70);
   await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('My newer edit'); await page.keyboard.press('Escape');
@@ -174,12 +174,12 @@ test('switching pages cancels pending work without adding it to the new page', a
   const gate = new Promise<void>(resolve => { release = resolve; });
   fixture.response(async () => { await gate; return { cards: [{ id: 'late-card', title: 'Old page work', body: 'This belongs to the old page.' }], updates: [] }; });
   await chat(page); await send(page);
-  await expect(page.getByText('Muse is thinking', { exact: true })).toBeVisible();
+  await expect(page.locator('.muse-chat-thinking')).toBeVisible();
   await page.getByRole('button', { name: 'Pages', exact: true }).click();
   await page.getByRole('menuitem', { name: 'New page', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pages', exact: true })).toContainText('Page 2');
   release();
-  await expect(page.getByText('Muse is thinking', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat-thinking')).toHaveCount(0);
   expect((await exported(page)).objects).toHaveLength(0);
 });
 

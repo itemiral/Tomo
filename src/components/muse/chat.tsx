@@ -4,13 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Plus, X } from 'lucide-react';
 import { MuseMarkdown, museRequest, RequestError, type MuseProfile } from './shared';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
+import { museProgressLabel, type MusePreparedContext, type MuseProgress } from '@/lib/muse-request';
+import { sendMuseChat } from './chat-request';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
-type Props = { attachImage: (file: File, signal: AbortSignal) => Promise<void>; expand: () => void; beforeSend?: () => Promise<void>; prepareContext?:()=>Promise<string>; selectedIds?:string[]; profile: MuseProfile; thread: string; boardContext: string; hidden: boolean; close: () => void; locked: () => void; onThinking: (busy: boolean, selectedIds?:string[]) => void; applyActions: (actions: MuseActions) => MuseApplyResult };
+type Props = { attachImage: (file: File, signal: AbortSignal) => Promise<void>; expand: () => void; beforeSend?: () => Promise<void>; prepareContext?:(message?:string,signal?:AbortSignal)=>Promise<string|MusePreparedContext>; selectedIds?:string[]; profile: MuseProfile; thread: string; boardContext: string; hidden: boolean; close: () => void; locked: () => void; onThinking: (busy: boolean, selectedIds?:string[],phase?:MuseProgress) => void; applyActions: (actions: MuseActions) => MuseApplyResult };
 export function MuseChat({ attachImage, expand, beforeSend, prepareContext, selectedIds=[], profile, thread, boardContext, hidden, close, locked, onThinking, applyActions }: Props) {
   const [messages, setMessages] = useState<Message[]>([]), [text, setText] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [ready, setReady] = useState(false);
   const [pending, setPending] = useState(''), [applied, setApplied] = useState<Record<string, MuseApplyResult>>({});
   const [suggestions,setSuggestions]=useState<string[]>([]);
+  const [phase,setPhase]=useState<MuseProgress>('context');
   const selectionKey=JSON.stringify([...selectedIds].sort()),selectionLabel=selectedIds.length===1?'1 selected item':`${selectedIds.length} selected items`;
   const currentSelection=useRef(selectionKey);currentSelection.current=selectionKey;
   useEffect(()=>{setSuggestions([]);},[selectionKey]);
@@ -30,20 +33,23 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
   async function send(suggestion?:string) {
     const message=(suggestion??text).trim();
     if (controller.current || busy || imageBusy || !message || !ready) return;
-    setBusy(true); setError(''); setText(''); setPending(message); setSuggestions([]); onThinking(true,selectedIds);
+    setBusy(true); setError(''); setText(''); setPending(message); setSuggestions([]); setPhase('context'); onThinking(true,selectedIds,'context');
     const abort = new AbortController(); controller.current = abort;
     try {
-      let context=boardContext;
-      if(prepareContext)context=await prepareContext();else await beforeSend?.();
+      let prepared: string | MusePreparedContext = boardContext;
+      if(prepareContext)prepared=await prepareContext(message,abort.signal);else await beforeSend?.();
       if(!mounted.current||abort.signal.aborted)return;
+      const packet = typeof prepared === 'string' ? {board:prepared} : prepared;
+      const context = packet.board;
       const focus=JSON.parse(context).selectedIds;
       const requestFocus=Array.isArray(focus)?focus.filter((id:unknown):id is string=>typeof id==='string'):[];
-      onThinking(true,requestFocus);expand();
-      const result = await museRequest<{ messages: Message[]; actions: MuseActions; suggestions?:string[]; personalizationUpdated?:boolean }>('chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thread, board: context, message }), signal: abort.signal });
+      const workingIds = requestFocus.length ? requestFocus : packet.anchorIds || [];
+      onThinking(true,workingIds,'context');expand();
+      const result = await sendMuseChat<{ messages: Message[]; actions: MuseActions; suggestions?:string[]; personalizationUpdated?:boolean }>({ thread, board: context, project:packet.project, images:packet.images, message }, abort.signal, phase=>{if(mounted.current&&!abort.signal.aborted){setPhase(phase);onThinking(true,workingIds,phase);}});
       if (mounted.current && !abort.signal.aborted) {
         setMessages(result.messages); onThinking(false);
         if (result.actions.cards.length || result.actions.updates.length || result.actions.images?.length) {
-          const applied = applyActions({...result.actions,focusIds:requestFocus,layout:/\b(align(?:ed)?|grid|table|timeline|kanban|rows?|columns?)\b/i.test(message)?'aligned':'organic'}), id = result.messages.at(-1)!.id;
+          const applied = applyActions({...result.actions,focusIds:requestFocus,anchorIds:packet.anchorIds,layout:/\b(align(?:ed)?|grid|table|timeline|kanban|rows?|columns?)\b/i.test(message)?'aligned':'organic'}), id = result.messages.at(-1)!.id;
           setApplied(values => ({ ...values, [id]: applied }));
         }
         if(currentSelection.current===JSON.stringify([...requestFocus].sort()))setSuggestions(Array.isArray(result.suggestions)?[...new Set(result.suggestions.filter(value=>typeof value==='string'&&value.trim()&&value.length<=100).map(value=>value.trim()))].slice(0,2):[]);
@@ -63,8 +69,8 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
     finally { if (imageController.current === abort) { imageController.current = null; if (mounted.current && !abort.signal.aborted) setImageBusy(false); } }
   }
   return <aside className={"muse-chat" + (hidden ? " collapsed" : "")} aria-label="Chat with Muse" data-muse-ui="true" onKeyDown={event => event.stopPropagation()}>
-    <header hidden={hidden}><div><strong>{profile.muse.name}</strong><span>{busy ? 'Thinking…' : selectedIds.length?selectionLabel:'Here with you'}</span></div><button aria-label="Close Muse chat" onClick={close}><X size={18}/></button></header>
-    <div hidden={hidden} className="muse-chat-messages" aria-live="polite">{!messages.length && !pending && <p className="muse-chat-intro">What would you like to work on?</p>}{messages.map(message => <div className={'muse-message ' + message.role} key={message.id}><MuseMarkdown text={message.content}/>{!!applied[message.id]?.skipped && <div className="muse-applied" role="status"><span>Kept {applied[message.id].skipped} card{applied[message.id].skipped === 1 ? '' : 's'} you changed or locked.</span></div>}</div>)}{pending && <div className="muse-message user"><MuseMarkdown text={pending}/></div>}{busy && <div className="muse-chat-thinking" role="status"><i/><i/><i/><span>Muse is thinking</span></div>}{!busy&&!text.trim()&&!!suggestions.length&&<div className="muse-next-moves" aria-label="Suggested next steps">{suggestions.map(value=><button key={value} type="button" disabled={imageBusy||!ready} onClick={()=>void send(value)}>{value}</button>)}</div>}<div ref={tail}/></div>
+    <header hidden={hidden}><div><strong>{profile.muse.name}</strong><span>{busy ? museProgressLabel[phase] : selectedIds.length?selectionLabel:'Here with you'}</span></div><button aria-label="Close Muse chat" onClick={close}><X size={18}/></button></header>
+    <div hidden={hidden} className="muse-chat-messages" aria-live="polite">{!messages.length && !pending && <p className="muse-chat-intro">What would you like to work on?</p>}{messages.map(message => <div className={'muse-message ' + message.role} key={message.id}><MuseMarkdown text={message.content}/>{!!applied[message.id]?.skipped && <div className="muse-applied" role="status"><span>Kept {applied[message.id].skipped} card{applied[message.id].skipped === 1 ? '' : 's'} you changed or locked.</span></div>}</div>)}{pending && <div className="muse-message user"><MuseMarkdown text={pending}/></div>}{busy && <div className="muse-chat-thinking" role="status"><i/><i/><i/><span>{museProgressLabel[phase]}</span></div>}{!busy&&!text.trim()&&!!suggestions.length&&<div className="muse-next-moves" aria-label="Suggested next steps">{suggestions.map(value=><button key={value} type="button" disabled={imageBusy||!ready} onClick={()=>void send(value)}>{value}</button>)}</div>}<div ref={tail}/></div>
     {busy && <button type="button" onClick={()=>{controller.current?.abort();controller.current=null;setBusy(false);setPending('');onThinking(false);}}>Stop response</button>}
     {error && <p className="muse-chat-error" role="alert">{error}</p>}
     <form onSubmit={event => { event.preventDefault(); void send(); }}>

@@ -26,6 +26,9 @@ import type { MuseActivity } from '../muse/floating';
 import { normalizeImageFile } from '../muse/image-upload';
 import { SignInToShare } from '../muse/sign-in';
 import { boardContext as makeBoardContext } from '@/lib/muse-board';
+import { prepareMuseProject, type MuseProjectContext } from '@/lib/muse-project';
+import type { MusePreparedContext } from '@/lib/muse-request';
+import { prepareMuseVisuals } from '../muse/visual-context';
 
 const TOOLS: Record<Tool, { name: string; icon: typeof MousePointer2; key: string; hint: string }> = {
   comment: { name:'Comment', icon:MessageCircle, key:'C', hint:'Click a spot on the canvas to leave a comment.' },
@@ -213,11 +216,11 @@ export default function MuzeEditor() {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, []);
 
-  async function prepareMuseContext() {
+  async function prepareMuseContext(message = '', signal = new AbortController().signal): Promise<MusePreparedContext> {
     const target = engine.current, owner = currentOwner.current, privateNotebook = museActive.current;
     const boardId = active?.id, pageId = page?.id;
     const currentBoard = () => museActive.current ? privateBoardRef.current : sharedRef.current.board || current.current?.boards.find(board => board.id === current.current?.activeBoard);
-    const isCurrent = () => engine.current === target && currentOwner.current === owner && museActive.current === privateNotebook && currentBoard()?.id === boardId && currentBoard()?.activePage === pageId;
+    const isCurrent = () => !signal.aborted && engine.current === target && currentOwner.current === owner && museActive.current === privateNotebook && currentBoard()?.id === boardId && currentBoard()?.activePage === pageId;
     if (!target || !owner || !boardId || !pageId || !isCurrent()) throw new Error('Open your board before messaging Muse.');
     const selectedIds = target.getSelectedIds();
     target.commitTextEditing();
@@ -225,8 +228,34 @@ export default function MuzeEditor() {
     if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
     await sharedRef.current.flush();
     if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
-    const board = currentBoard()!, currentPage = board.pages.find(item => item.id === pageId)!;
-    return makeBoardContext(board.name, currentPage.name, target.serialize().objects, selectedIds, target.getSceneItems());
+    const board = currentBoard()!, drawing = target.serialize();
+    const snapshot = { ...board, pages: board.pages.map(item => item.id === pageId ? { ...item, ...drawing } : item) };
+    const prepared = prepareMuseProject({ board: snapshot, message, selectedIds, activeDrawing: drawing, sceneItems: target.getSceneItems() });
+    const project = JSON.parse(prepared.projectContext) as MuseProjectContext;
+    const visualRequest = /\b(images?|photos?|pictures?|diagrams?|sketch(?:es)?|drawings?|charts?|screenshots?|visuals?|look|see|shown|captions?|attachments?)\b|图|照片|图片|그림|사진|изображ|фото|рисун|схем|скрин/iu.test(message);
+    const selected = new Set(selectedIds);
+    const graphics: Record<string, unknown>[] = [];
+    const visit = (objects: Record<string, unknown>[], depth = 0) => {
+      if (depth > 12) return;
+      for (const item of objects) {
+        if (['path','muzearrow','muzeshape','group','line','rect','circle','ellipse','polygon','polyline','triangle'].includes(String(item.type).toLowerCase())) graphics.push(item);
+        if (Array.isArray(item.objects)) visit(item.objects, depth + 1);
+      }
+    };
+    visit(drawing.objects);
+    const needsScene = graphics.some(item => selected.has(String(item.id))) || visualRequest && graphics.length > 0;
+    const refs = prepared.imageCandidates.filter(ref => ref.selected || visualRequest).slice(0, needsScene ? 2 : 3);
+    let scene: string | undefined;
+    if (needsScene) {
+      scene = target.captureMuseRegion(selectedIds.length ? selectedIds : prepared.anchorIds);
+      if (scene) {
+        const ref = { pageId, objectId: 'scene-preview', selected: false, reason: 'visual-region' as const, kind: 'scene' as const };
+        refs.push(ref); project.images.push(ref); project.coverage.images.total++; project.coverage.images.included++;
+      }
+    }
+    const images = await prepareMuseVisuals(snapshot, refs, signal, scene);
+    if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+    return { board: prepared.boardContext, project: JSON.stringify(project), images, anchorIds: prepared.anchorIds };
   }
   async function attachImage(file: File, signal: AbortSignal) {
     const target = engine.current, owner = currentOwner.current, privateNotebook = museActive.current;

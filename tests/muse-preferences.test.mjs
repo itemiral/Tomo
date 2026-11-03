@@ -5,8 +5,10 @@ import {tmpdir} from 'node:os';
 import {resolve,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
 const dir=await mkdtemp(join(tmpdir(),'muse-preferences-'));process.env.MUZE_PRIVATE_DIR=join(dir,'private');process.env.MODEL_API_KEY='test-only-not-a-real-key';
-const bundle=await build({entryPoints:['src/server/muse/model.ts'],bundle:true,write:false,platform:'node',format:'esm',plugins:[{name:'server-test',setup(b){b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:''}));b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));}}]});await writeFile(join(dir,'model.mjs'),bundle.outputFiles[0].text);
+const bundle=await build({entryPoints:['src/server/muse/model.ts'],bundle:true,write:false,platform:'node',format:'esm',plugins:[{name:'server-test',setup(b){b.onResolve({filter:/^sharp$/},()=>({path:require.resolve('sharp'),external:true}));b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:''}));b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));}}]});await writeFile(join(dir,'model.mjs'),bundle.outputFiles[0].text);
 const {askMuse}=await import(pathToFileURL(join(dir,'model.mjs')));const {readMuseCanvas,saveMuseCanvas}=await import('../scripts/muse-canvas.mjs');
 after(()=>rm(dir,{recursive:true,force:true}));
 test('ordinary-board model requests include current saved notebook preferences across threads and isolate owners',async()=>{
