@@ -20,3 +20,43 @@ test('database key ordering does not create scene changes or conflicts',()=>{
  assert.equal(mergeSharedBoard(base,local,remote).pages[0].objects[0].text,'My edit');
  assert.equal(equalBoardValues(base.pages[0].objects,[...remote.pages[0].objects].reverse()),false);
 });
+
+test('incompatible concurrent layer orders produce a conflict instead of dropping a peer reorder',()=>{
+ const base=board();base.pages[0].objects.push({id:'three',text:'Third',left:100});
+ const local=structuredClone(base),remote=structuredClone(base);
+ local.pages[0].objects=[local.pages[0].objects[0],local.pages[0].objects[2],local.pages[0].objects[1]];
+ remote.pages[0].objects=[remote.pages[0].objects[1],remote.pages[0].objects[0],remote.pages[0].objects[2]];
+ assert.throws(()=>mergeSharedBoard(base,local,remote),BoardConflict);
+ assert.throws(()=>mergeSharedBoard(base,remote,local),BoardConflict);
+});
+
+test('one peer reorder still merges another peer text edit or deletion',()=>{
+ const base=board();base.pages[0].objects.push({id:'three',text:'Third',left:100});
+ const local=structuredClone(base),remote=structuredClone(base);
+ local.pages[0].objects.reverse();remote.pages[0].objects[1].text='Remote wording';
+ const merged=mergeSharedBoard(base,local,remote);
+ assert.deepEqual(merged.pages[0].objects.map(value=>value.id),['three','two','one']);
+ assert.equal(merged.pages[0].objects[1].text,'Remote wording');
+ remote.pages[0].objects.shift();
+ assert.deepEqual(mergeSharedBoard(base,local,remote).pages[0].objects.map(value=>value.id),['three','two']);
+});
+
+test('drawing deltas preserve a peer insertion that the local canvas has not rendered yet',async()=>{
+ const {mergeSharedDrawing}=await import('../src/components/muze/shared-merge.ts');
+ const previous=board().pages[0],local=structuredClone(previous),remote=structuredClone(previous);
+ local.objects[0].left=120;local.viewport=[2,0,0,2,80,40];remote.objects.push({id:'peer-note',text:'Keep this peer work'});
+ const merged=mergeSharedDrawing(previous,local,remote);
+ assert.equal(merged.objects[0].left,120);assert.equal(merged.objects.at(-1).id,'peer-note');assert.deepEqual(merged.viewport,local.viewport);
+ assert.equal(remote.objects[0].left,0);assert.equal(previous.objects.length,2);
+ remote.objects[0].text='Peer wording';local.objects[0].text='My wording';
+ assert.throws(()=>mergeSharedDrawing(previous,local,remote),BoardConflict);
+});
+
+test('two first comments on a board without a comments array merge independently',()=>{
+ const base=board();delete base.comments;
+ const local={...structuredClone(base),comments:[{id:'mine',author:'One',text:'My first comment'}]};
+ const remote={...structuredClone(base),comments:[{id:'peer',author:'Two',text:'Peer first comment'}]};
+ const merged=mergeSharedBoard(base,local,remote);
+ assert.deepEqual(new Set(merged.comments.map(value=>value.id)),new Set(['mine','peer']));
+ assert.ok(sameScene(base,{...base,comments:[]}));
+});

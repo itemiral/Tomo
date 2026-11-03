@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {presenceName,readPerson,readCursor,readRoom,uniquePeople,worldPoint,screenPoint} from '../src/components/muze/presence-state.ts';
+import {presenceName,readPerson,readActivity,readCursor,readRoom,uniquePeople,worldPoint,screenPoint} from '../src/components/muze/presence-state.ts';
 const person={userId:'user_one',name:'Izat',tabId:'tab_one',pageId:'page_one',muse:'idle'};
 test('presence accepts only a bounded public description and drops private fields',()=>{
  const parsed=readPerson({...person,soul:'Private',memory:'Private',chat:['Private'],email:'private@example.test'});
@@ -9,6 +9,8 @@ test('presence accepts only a bounded public description and drops private field
 test('Muse targets contain only a bounded shared object ID while work is active',()=>{
  const working={...person,muse:'working',museTargetId:'muse-turn-0'};
  assert.deepEqual(readPerson({...working,request:'Private prompt',reasoning:'Private notes'}),working);
+ assert.deepEqual(readPerson({...working,activityRevision:2}),{...working,activityRevision:2});
+ assert.equal(readPerson({...working,activityRevision:Infinity}).activityRevision,undefined);
  assert.deepEqual(readPerson({...person,museTargetId:'muse-turn-0'}),person);
  for(const value of ['', 'x'.repeat(101), {text:'Private'}, 'a\nb', '<script>', '../../soul.md'])assert.equal(readPerson({...working,museTargetId:value}).museTargetId,undefined);
 });
@@ -25,4 +27,13 @@ test('world coordinates stay accurate across different browsers pan and zoom',()
  const point=worldPoint(500,350,[2,0,0,2,100,50]);assert.deepEqual(point,{x:200,y:150});
  assert.deepEqual(screenPoint(point.x,point.y,[.5,0,0,.5,80,40]),{x:180,y:115});
  assert.equal(worldPoint(0,0,[0,0,0,0,0,0]),null);
+});
+
+
+test('activity accepts only bounded public work metadata and a monotonic revision',()=>{
+ const value={tabId:'tab_one',pageId:'page_two',muse:'working',museTargetId:'note-one',revision:2};
+ assert.deepEqual(readActivity({...value,name:'Another owner',userId:'forged-owner',memory:'PRIVATE'}),value);
+ assert.deepEqual(readActivity({...value,muse:'idle'}),{tabId:'tab_one',pageId:'page_two',muse:'idle',revision:2});
+ for(const revision of [0,-1,1.5,Infinity,'2',Number.MAX_SAFE_INTEGER+1])assert.equal(readActivity({...value,revision}),null);
+ assert.equal(readActivity({...value,pageId:'../../private'}),null);
 });

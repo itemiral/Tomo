@@ -94,3 +94,27 @@ test('profile publication retries transient failures and refreshes only the curr
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('muse-name-saved', { detail: { ownerId: 'owner-a', name: 'New name' } })));
   await expect.poll(() => page.evaluate(() => (window as any).profileView['owner-a']?.museName)).toBe('Version 4');
 });
+
+
+test('stalled participant reads and publication time out and recover on the next refresh', async ({page}) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window), held = new Set<string>();
+    (AbortSignal as any).timeout = (milliseconds:number) => {const controller=new AbortController();setTimeout(()=>controller.abort(new DOMException('Deadline','TimeoutError')),milliseconds);return controller.signal;};
+    (window as any).stalledRequests = 0;
+    window.fetch = (input, init) => {
+      const url=String(input), method=init?.method || 'GET';
+      if(url.endsWith('/participants') && !held.has(method)) {
+        held.add(method);(window as any).stalledRequests++;
+        return new Promise((_resolve,reject)=>init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true}));
+      }
+      return original(input, init);
+    };
+  });
+  await page.route('**/api/boards/*/participants', route => route.fulfill({json:response()}));
+  await fixture(page);
+  await expect.poll(()=>page.evaluate(()=>(window as any).stalledRequests)).toBe(2);
+  await page.clock.runFor(15001);
+  await page.clock.runFor(5001);
+  await expect(page.getByLabel('Bo’s Kumo, working', {exact:true})).toBeVisible();
+});

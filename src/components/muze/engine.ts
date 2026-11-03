@@ -6,7 +6,7 @@ import { GRID_STEP } from './grid';
 import { clampZoom, clampViewport, MAX_ZOOM } from './zoom';
 import { FONTS, SIZES, loadFonts, pale, svgFonts } from './styles';
 import { download, filename, parseObjects, type Drawing } from './storage';
-import { equalBoardValues } from './shared-merge';
+import { equalBoardValues, mergeSharedDrawing } from './shared-merge';
 import { frameCanvasBoxes, usableCanvasArea } from './canvas-framing';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 
@@ -26,6 +26,10 @@ export class WhiteboardEngine {
   tool: Tool = 'select';
   paint = { ...INITIAL_PAINT };
   private history: string[] = [];
+  private publishedDrawing?: Drawing;
+  private loadingDrawing?: Drawing;
+  private pendingShared?: {drawing: Drawing; base: Drawing; ignoreMuseUi: boolean};
+  private sharedTimer?: ReturnType<typeof setTimeout>;
   private future: string[] = [];
   private loading = true;
   private loadVersion = 0;
@@ -56,7 +60,7 @@ export class WhiteboardEngine {
   onComment?: (point: {x:number;y:number}) => void;
   onLaser?: (point: { x: number; y: number } | null) => void;
 
-  constructor(element: HTMLCanvasElement, private changed: (drawing: Drawing) => void, private state: (state: EditorState) => void, private report: (message: string) => void) {
+  constructor(element: HTMLCanvasElement, private changed: (drawing: Drawing, previous?: Drawing) => void, private state: (state: EditorState) => void, private report: (message: string) => void) {
     this.canvas = new Canvas(element, { width: window.innerWidth, height: window.innerHeight, preserveObjectStacking: true, selection: true, selectionColor: '#3278ef14', selectionBorderColor: '#3278ef', selectionLineWidth: 1, enablePointerEvents: true, fireMiddleClick: true, stopContextMenu: true, uniformScaling: false, selectionKey: 'shiftKey', altActionKey: 'ctrlKey' });
     const c = this.canvas;
     const renderObjects = c._renderObjects.bind(c);
@@ -87,6 +91,16 @@ export class WhiteboardEngine {
       if (enteringMobile && !this.loading) this.scheduleFrame(c.getObjects(), true);
     });
     this.resize.observe(element.parentElement!.parentElement!);
+    // Fabric handles transforms before our mouse callbacks. Block new canvas
+    // gestures while a scene is loading so they cannot be silently discarded.
+    const holdPointerWhileLoading = (event: Event) => {
+      if (!this.loading) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+    };
+    for (const event of ['pointerdown', 'dblclick', 'wheel']) {
+      c.upperCanvasEl.addEventListener(event, holdPointerWhileLoading, {capture: true, passive: false});
+      this.disposers.push(() => c.upperCanvasEl.removeEventListener(event, holdPointerWhileLoading, true));
+    }
     c.on('mouse:down', event => {this.pointerBusy=true;this.down(event.e);});
     c.on('mouse:move', event => this.move(event.e));
     c.on('mouse:up', ({ e }) => {this.pointerBusy=false;this.up(e);});
@@ -147,7 +161,9 @@ export class WhiteboardEngine {
   }
   async load(drawing: Drawing) {
     this.loadVersion++;
+    this.loadingDrawing = drawing;
     this.loading = true;
+    try {
     await loadFonts();
     if (this.closed) return;
     const migrate = (object: Record<string, unknown>): Record<string, unknown> => {
@@ -160,10 +176,12 @@ export class WhiteboardEngine {
     this.canvas.setViewportTransform(viewport);
     this.canvas.getObjects().forEach(object => { object.id ||= crypto.randomUUID(); this.configure(object); });
     this.syncLabels(); this.rememberFrames();
+    this.publishedDrawing = this.serialize(); this.loadingDrawing = undefined;
     this.history = [this.snapshot()]; this.future = []; this.loading = false; this.setTool('select'); this.canvas.requestRenderAll(); this.emit();
-    if (viewport[0] !== drawing.viewport[0]) this.changed({ objects: drawing.objects, viewport });
+    if (viewport[0] !== drawing.viewport[0]) this.changed({ objects: drawing.objects, viewport }, drawing);
     if (!this.opened && this.mobile) this.scheduleFrame(this.canvas.getObjects(), true);
     this.opened = true;
+    } catch (error) { this.loading = false; this.loadingDrawing = undefined; this.emit(); throw error; }
   }
   private snapshot() { return JSON.stringify(this.canvas.toObject()); }
   canReceiveSharedChanges(ignoreMuseUi = false) {
@@ -172,13 +190,61 @@ export class WhiteboardEngine {
     return !this.loading && !this.start && !this.pan && !this.pinch && !this.canvas._currentTransform && !this.pointerBusy && !editingCanvas && (!this.editing() || museInput);
   }
   async applySharedDrawing(drawing: Drawing, ignoreMuseUi = false) {
-    if (!this.canReceiveSharedChanges(ignoreMuseUi) || equalBoardValues(this.serialize().objects, drawing.objects)) return;
-    const tool = this.tool, paint = {...this.paint}, viewport = [...this.canvas.viewportTransform], selected = this.canvas.getActiveObjects().map(object => object.id);
-    await this.load({...drawing,viewport});
     if (this.closed) return;
+    // A peer update can arrive between the hook's idle check and React's effect.
+    // Retain it until the current gesture or text edit has finished.
+    this.pendingShared = {drawing, base: this.loadingDrawing || this.publishedDrawing || this.serialize(), ignoreMuseUi};
+    await this.receiveSharedDrawing();
+  }
+  private async receiveSharedDrawing() {
+    if (this.closed || !this.pendingShared) return;
+    if (!this.canReceiveSharedChanges(this.pendingShared.ignoreMuseUi)) {
+      if (!this.sharedTimer) this.sharedTimer = setTimeout(() => {
+        this.sharedTimer = undefined;
+        void this.receiveSharedDrawing().catch(error => this.report(error instanceof Error ? error.message : 'Could not display the latest board changes.'));
+      }, 100);
+      return;
+    }
+    if (this.sharedTimer) { clearTimeout(this.sharedTimer); this.sharedTimer = undefined; }
+    const pending = this.pendingShared; this.pendingShared = undefined;
+    const before = this.serialize();
+    const drawing = mergeSharedDrawing(pending.base, before, pending.drawing);
+    if (equalBoardValues(before.objects, drawing.objects)) return;
+    const tool = this.tool, paint = {...this.paint}, viewport = [...this.canvas.viewportTransform], selected = this.canvas.getActiveObjects().map(object => object.id);
+    const history = this.history, future = this.future;
+    try { await this.load({...drawing, viewport}); }
+    catch {
+      if (this.closed) return;
+      try { await this.load(before); }
+      finally { this.history = history; this.future = future; this.paint = paint; this.setTool(tool); this.restoreSharedSelection(selected); }
+      throw new Error('Could not display the latest board change. Your current canvas is preserved.');
+    }
+    if (this.closed) return;
+    const after = this.serialize(), current = this.snapshot();
+    // Rebase local undo/redo snapshots over the peer change. Stop at a
+    // conflicting step rather than letting Undo overwrite a peer's newer work.
+    const rebase = (snapshots: string[]) => {
+      const result: string[] = [];
+      for (const snapshot of [...snapshots].reverse()) {
+        try {
+          const saved = JSON.parse(snapshot);
+          const objects = mergeSharedDrawing(before, {...before, objects: saved.objects}, after).objects;
+          const next = JSON.stringify({...saved, objects});
+          if (!equalBoardValues(objects, result.length ? JSON.parse(result[0]).objects : after.objects)) result.unshift(next);
+        } catch { break; }
+      }
+      return result;
+    };
+    this.history = [...rebase(history.slice(0, -1)), current];
+    this.future = rebase(future);
     this.paint = paint; this.setTool(tool);
+    this.restoreSharedSelection(selected);
+    if (this.pendingShared) await this.receiveSharedDrawing();
+  }
+  private restoreSharedSelection(selected: (string | undefined)[]) {
     const remaining = this.canvas.getObjects().filter(object => selected.includes(object.id));
     if (remaining.length === 1) this.canvas.setActiveObject(remaining[0]);
+    else if (remaining.length > 1) this.canvas.setActiveObject(new ActiveSelection(remaining, {canvas: this.canvas}));
     this.canvas.requestRenderAll(); this.emit();
   }
   setDark(value: boolean) { this.dark = value; this.syncLabels(); this.canvas.requestRenderAll(); }
@@ -233,7 +299,7 @@ export class WhiteboardEngine {
     const kind = active.length > 1 ? 'mixed' : first instanceof MuzeNote ? 'note' : first instanceof IText ? 'text' : first instanceof MuzeArrow ? 'arrow' : first instanceof FabricImage ? 'image' : first ? 'shape' : 'none';
     this.state({ ready: !this.loading, tool: this.tool, zoom: this.canvas.getZoom(), selected: active.length, selectedIds: this.getSelectedIds(), canUndo: this.history.length > 1, canRedo: !!this.future.length, count: this.canvas.getObjects().filter(o => !o.labelFor).length, locked: this.locked, snap: this.snap, paint: this.selectionPaint(), selectionKind: kind, guides: this.guides, viewport: [...this.canvas.viewportTransform], items: this.getSceneItems() });
   }
-  private publish() { if (this.loading || this.closed) return; this.changed(this.serialize()); this.emit(); }
+  private publish() { if (this.loading || this.closed) return; const previous = this.publishedDrawing, drawing = this.serialize(); this.publishedDrawing = drawing; this.changed(drawing, previous); this.emit(); }
   checkpoint() {
     if (this.loading || this.closed) return;
     const next = this.snapshot();
@@ -822,5 +888,5 @@ export class WhiteboardEngine {
       active.set({ left: active.left + (key === 'arrowleft' ? -delta : key === 'arrowright' ? delta : 0), top: active.top + (key === 'arrowup' ? -delta : key === 'arrowdown' ? delta : 0) }); active.setCoords(); this.moveFrame(active); this.syncLabels(); this.connectors(); this.checkpoint();
     }
   }
-  dispose() { this.closed = true; if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
+  dispose() { this.closed = true; if (this.sharedTimer) clearTimeout(this.sharedTimer); this.pendingShared = undefined; if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
 }

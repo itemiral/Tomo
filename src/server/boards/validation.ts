@@ -36,14 +36,51 @@ export function sharedBoard(value: unknown, id?: string): Board {
     const board = parseBoardFile(JSON.stringify({ format: 'muze', version: 1, board: value }));
     if (!board.name.trim()) throw new Error('Missing name');
     for (const page of board.pages) {
+      if (!page.id || page.id.length > 160) throw new Error('Invalid page ID');
       const ids = new Set<string>();
-      for (const object of page.objects) {
-        if (typeof object.id !== 'string' || !object.id || object.id.length > 160 || ids.has(object.id)) throw new Error('Invalid object ID');
-        ids.add(object.id);
-      }
+      const walk = (objects: Record<string, unknown>[], nested = false) => {
+        for (const object of objects) {
+          if (object.id !== undefined || !nested) {
+            if (typeof object.id !== 'string' || !object.id || object.id.length > 160 || ids.has(object.id)) throw new Error('Invalid object ID');
+            ids.add(object.id);
+          }
+          if (Array.isArray(object.objects)) walk(object.objects, true);
+        }
+      };
+      walk(page.objects);
+    }
+    const commentIds = new Set<string>();
+    for (const comment of board.comments || []) {
+      if (!comment.id || comment.id.length > 160 || commentIds.has(comment.id)) throw new Error('Invalid comment ID');
+      commentIds.add(comment.id);
     }
     return { id: id || board.id, name: board.name.trim(), activePage: board.activePage,
       pages: board.pages.map(page => ({ id: page.id, name: page.name.slice(0, 160), objects: page.objects, viewport: page.viewport })),
       ...(board.comments ? { comments: board.comments } : {}) };
   } catch { throw new PrivateError(400, 'This board contains invalid drawing data.'); }
+}
+
+
+// Optional source links must not make an otherwise valid saved drawing unreadable.
+// Writes still use sharedBoard directly; this repair never changes stored data.
+export function readSharedBoard(value: unknown, id?: string): Board {
+  const board = structuredClone(value);
+  const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item);
+  const clean = (objects: unknown, depth = 0) => {
+    if (!Array.isArray(objects) || depth > 12) return;
+    for (const item of objects) {
+      if (!object(item)) continue;
+      for (const field of ['sourceUrl', 'imageUrl']) if (item[field] !== undefined) {
+        try {
+          const reference = item[field];
+          if (typeof reference !== 'string' || reference.length > 2048) throw new Error('Invalid reference');
+          const url = new URL(reference);
+          if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid reference');
+        } catch { delete item[field]; }
+      }
+      clean(item.objects, depth + 1);
+    }
+  };
+  if (object(board) && Array.isArray(board.pages)) for (const page of board.pages) if (object(page)) clean(page.objects);
+  return sharedBoard(board, id);
 }
