@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { X, Pencil, ImagePlus, MessageCircle } from 'lucide-react';
 import { MuseIcon, type MuseProfile } from './shared';
 
@@ -33,7 +33,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
   const moveTo = useCallback((p: Position, wander = false) => { point.current = p; setPosition(p); setRoaming(wander); }, []);
   const bounds = useCallback(() => {
     const compact = innerWidth <= 700;
-    const w = button.current?.offsetWidth || (compact ? 44 : 92), h = (button.current?.offsetHeight || (compact ? 44 : 116)) + (compact ? 0 : 10);
+    const w = button.current?.offsetWidth || (compact ? 44 : 92), h = (button.current?.offsetHeight || (compact ? 44 : 116)) + (compact ? latest.current.activity.label ? 36 : 0 : 10);
     const clamp = (p: Position) => ({ x: Math.max(16, Math.min(innerWidth - w - 16, p.x)), y: Math.max(compact ? 60 : 104, Math.min(innerHeight - h - 120, p.y)) });
     return { w, h, clamp, compact };
   }, []);
@@ -129,7 +129,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     settle();
   }
-  return <><button ref={button} type="button" className={'muse-floating' + (dragging ? ' dragging' : '') + (held ? ' held' : '') + (roaming ? ' roaming' : '') + (activity.label ? ' working' : '')} style={{ left: position.x, top: position.y }} aria-label="Open Muse" aria-haspopup="dialog" aria-expanded={popupOpen} title="Muse — drag to move; click to open"
+  return <><button ref={button} type="button" className={'muse-floating' + (dragging ? ' dragging' : '') + (held ? ' held' : '') + (roaming ? ' roaming' : '') + (activity.label ? ' working' : '')} style={{ left: position.x, top: position.y, '--muse-x': position.x + 'px' } as CSSProperties} aria-label="Open Muse" aria-haspopup="dialog" aria-expanded={popupOpen} title="Muse — drag to move; click to open"
     onPointerEnter={() => { hovered.current = true; setHeld(true); if (!drag.current) freeze(); }}
     onPointerLeave={() => { hovered.current = false; release(); }}
     onFocus={event => { if (event.currentTarget.matches(':focus-visible')) { focused.current = true; setHeld(true); freeze(); } }}
@@ -159,7 +159,7 @@ export function FloatingMuse({ profile, profileLoading, avatarPending, open, cha
     <span className="muse-floating-shadow" aria-hidden="true"/>
     <MuseIcon profile={profile} loading={profileLoading} followCursor pending={avatarPending}/>
     <span className="muse-floating-name">{profile?.muse.name || 'Muse'}</span>
-    {activity.label && <span className={activity.targetId ? 'muse-sr-only' : 'muse-floating-activity'} role="status">{activity.label}</span>}
+    {activity.label && <span className="muse-floating-activity" role="status">{activity.label}</span>}
   </button>
   {popupOpen && <div ref={popup} role="dialog" aria-label="Muse" className="muse-character-popup" style={{left:Math.max(12,Math.min(innerWidth-232,position.x+100)),top:Math.max(76,Math.min(innerHeight-230,position.y))}} onKeyDown={event=>event.stopPropagation()}>
     <header><strong>{profile?.muse.name || 'Muse'}</strong><button aria-label="Close Muse popup" onClick={()=>{setPopupOpen(false);button.current?.focus();}}><X size={16}/></button></header>

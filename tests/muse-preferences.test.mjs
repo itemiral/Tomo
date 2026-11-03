@@ -29,6 +29,33 @@ test('normal chat runs real search orchestration with citations and no notebook 
  try{const result=await askMuse('chat-search-test',{thread:'board:search',message:'Search the web for public gardens',board:JSON.stringify({board:'Test',page:'One',objects:[]})},new AbortController().signal);assert.equal(calls.length,2);assert.equal(calls[0].request.input[1].content,'Search the web for public gardens');assert.doesNotMatch(JSON.stringify(calls[0].request),/Soul.md|Memory.md|Private Muse/);assert.match(calls[1].request.messages.at(-1).content,/A verified public finding/);assert.match(result.messages.at(-1).content,/Actual evidence.*https:\/\/example.org\/evidence/);}finally{globalThis.fetch=original;}
 });
 
+test('natural fare questions fetch cited public evidence before Muse answers without promising booking access',async()=>{
+ const original=globalThis.fetch,calls=[],phases=[];
+ const message='Find flights from San Francisco to Seoul for December 12–20';
+ const evidence='Advertised fares start at $450 for the specified dates.';
+ globalThis.fetch=async(url,options)=>{
+  const request=JSON.parse(options.body);calls.push({url,request});
+  if(url.endsWith('/responses'))return new Response(JSON.stringify({status:'completed',output:[
+   {type:'web_search_call',status:'completed'},
+   {type:'message',content:[{type:'output_text',text:evidence,annotations:[{type:'url_citation',url:'https://example.org/fares',title:'Public fare listing',start_index:0,end_index:evidence.length}]}]},
+  ]}));
+  assert.equal(url,'https://api.meta.ai/v1/chat/completions');
+  return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({reply:'Public fares start at $450; booking availability needs confirmation.',cards:[],updates:[]})}}]}));
+ };
+ try{
+  const result=await askMuse('natural-fares-owner',{thread:'fares:page',message,board:JSON.stringify({board:'Our travel plan',page:'Flights',objects:[]})},new AbortController().signal,'low',phase=>phases.push(phase));
+  assert.equal(calls.length,2);
+  assert.deepEqual(calls[0].request.tools,[{type:'web_search',search_context_size:'low'}]);
+  assert.equal(calls[0].request.input[1].content,message);
+  assert.doesNotMatch(JSON.stringify(calls[0].request),/Soul.md|Memory.md|Private Muse/);
+  assert.ok(phases.includes('research'));
+  assert.match(calls[1].request.messages[0].content,/Public web search is available/);
+  assert.match(calls[1].request.messages[0].content,/no interactive browser, booking, purchase, or live inventory tool/);
+  assert.ok(calls[1].request.messages.at(-1).content.includes(evidence));
+  assert.match(result.messages.at(-1).content,/Public fare listing.*https:\/\/example.org\/fares/);
+ }finally{globalThis.fetch=original;}
+});
+
 test('selected context reaches Muse and scoped suggestions stay outside saved chat and board actions',async()=>{
  const {readMuseChat}=await import('../scripts/muse-store.mjs');
  const original=globalThis.fetch;let captured,offScope=false;
