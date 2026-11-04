@@ -5,8 +5,8 @@ const learned = (value: string) => '\n\n<!-- muze-learned:start -->\n## Learned 
 async function openNotebook(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Open Muse', exact: true }).click();
   await page.getByRole('dialog', { name: 'Muse', exact: true }).getByRole('button', { name: 'Edit Muse', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-muse-board', 'true');
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-muse-board', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
 }
 function updateSoul(fixture: Awaited<ReturnType<typeof museFixture>>, text: string) {
   const canvas = fixture.canvases.get('owner-a')!;

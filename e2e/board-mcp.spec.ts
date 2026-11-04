@@ -42,8 +42,8 @@ test('only a published board owner can create, copy and revoke a private tool co
   const field=share.getByRole('textbox',{name:'Tool connection configuration'});
   await expect(field).toBeVisible();
   const configuration=JSON.parse(await field.inputValue());
-  expect(configuration.mcpServers.muze.url).toBe(new URL('/api/mcp/boards/'+id,page.url()).href);
-  expect(configuration.mcpServers.muze.headers.Authorization).toBe('Bearer muze_'+'1'.repeat(43));
+  expect(configuration.mcpServers.tomo.url).toBe(new URL('/api/mcp/boards/'+id,page.url()).href);
+  expect(configuration.mcpServers.tomo.headers.Authorization).toBe('Bearer muze_'+'1'.repeat(43));
   await share.getByRole('button',{name:'Copy configuration',exact:true}).click();
   expect(JSON.parse(await page.evaluate(()=>navigator.clipboard.readText()))).toEqual(configuration);
   await share.getByRole('button',{name:'Connect a tool',exact:true}).click();

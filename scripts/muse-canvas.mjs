@@ -22,20 +22,25 @@ async function initialBoard(owner, notes) {
   const old = await readMuseBoard(owner);
   const objects = [fileCard('soul',notes.soul.content,220,190,-2),fileCard('memory',notes.memory.content,750,270,2)];
   old.cards.forEach((c,i)=>objects.push({...fileCard('memory',c.text,240+(i%2)*500,850+Math.floor(i/2)*320,0),id:c.id,documentTitle:'Memory note.md',width:420,boxHeight:240}));
-  return {id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects,viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Muze',text:MUSE_COMMENT},...old.comments]};
+  return {id:'muse-private',name:'My Muse’s notebook',activePage:'muse-notebook',pages:[{id:'muse-notebook',name:'Notebook',objects,viewport:[.75,0,0,.75,0,0]}],comments:[{id:'muse-welcome',pageId:'muse-notebook',x:1230,y:150,author:'Tomo',text:MUSE_COMMENT},...old.comments]};
 }
 async function raw(owner) { try { return await readFile(join(museDirectory(owner),'canvas.json'),'utf8'); } catch(e) { if(e.code==='ENOENT') return null; throw e; } }
 export async function readMuseCanvas(owner) {
  return withMuseOwner(owner,async()=>{
   const identity=await ensureMuse(owner);
   const notes = {soul:await readMuseNote(owner,'soul'),memory:await readMuseNote(owner,'memory')};
-  const legacyIntroduction='# Soul\n\n## Who I am\nI’m Muse, your companion inside Muze.';
-  if(identity.name!=='Muse'&&notes.soul.content.startsWith(legacyIntroduction)){
-    const content=notes.soul.content.replace(legacyIntroduction,()=>`# Soul\n\n## Who I am\nI’m ${identity.name}, your companion inside Muze.`);
-    notes.soul=await saveMuseNoteUnlocked(owner,'soul',content,notes.soul.revision);
+  for(const app of ['Muze','Tomo']){
+    const legacyIntroduction=`# Soul\n\n## Who I am\nI’m Muse, your companion inside ${app}.`;
+    if(identity.name!=='Muse'&&notes.soul.content.startsWith(legacyIntroduction)){
+      const content=notes.soul.content.replace(legacyIntroduction,()=>`# Soul\n\n## Who I am\nI’m ${identity.name}, your companion inside ${app}.`);
+      notes.soul=await saveMuseNoteUnlocked(owner,'soul',content,notes.soul.revision);
+    }
   }
   const text = await raw(owner), board = text ? JSON.parse(text) : await initialBoard(owner,notes);
-  for(const comment of board.comments||[])if(comment.id==='muse-welcome'&&previousWelcomeMessages.has(comment.text))comment.text=MUSE_COMMENT;
+  for(const comment of board.comments||[])if(comment.id==='muse-welcome'&&(comment.text===MUSE_COMMENT||previousWelcomeMessages.has(comment.text))){
+    comment.text=MUSE_COMMENT;
+    if(comment.author==='Muze')comment.author='Tomo';
+  }
   let nameObject;for(const page of board.pages)walkObjects(page.objects,o=>{if(o.id==='muse-name')nameObject=o;});
   if(!nameObject){nameObject={type:'MuzeText',id:'muse-name',muzeKind:'muse-name',left:220,top:100,width:950,fontFamily:'Inter',fontSize:40,fill:'#202124',editable:false,autoWidth:true,text:NAME_PREFIX+identity.name+'.'};board.pages[0].objects.push(nameObject);}
   nameObject.editable=false;nameObject.styles=museNameStyles(identity.name);nameObject.fontSize=40;nameObject.width=Math.max(950,nameObject.width||0);board.museName=identity.name;

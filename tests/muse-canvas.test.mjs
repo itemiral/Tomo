@@ -108,20 +108,24 @@ test('saved default welcome comments adopt current copy while custom welcome com
  const owner = 'welcome-copy', snapshot = await readMuseCanvas(owner);
  const welcome = snapshot.board.comments.find(comment => comment.id === 'muse-welcome');
  assert.ok(welcome);
+ assert.equal(welcome.author, 'Tomo');
  const prefix = 'A little notebook for your Muse. Your words, comments and drawings become context. ';
  for (const message of [
   prefix + 'Pictures stay local—add a caption for what Muse should know.',
   prefix + 'Pictures stay in your private notebook—add a caption for what Muse should know.',
+  MUSE_COMMENT,
  ]) {
-  welcome.text = message;
+  welcome.text = message;welcome.author = 'Muze';
   await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
   const reloaded = await readMuseCanvas(owner);
   assert.equal(reloaded.board.comments.find(comment => comment.id === 'muse-welcome').text, MUSE_COMMENT);
+  assert.equal(reloaded.board.comments.find(comment => comment.id === 'muse-welcome').author, 'Tomo');
  }
  assert.equal(MUSE_COMMENT, 'Your private Muse notebook. Your notes, comments, and captions help Muse understand you.');
  welcome.text = 'My own welcome and planning reminders.';
  await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
  assert.equal((await readMuseCanvas(owner)).board.comments.find(comment => comment.id === 'muse-welcome').text, welcome.text);
+ assert.equal((await readMuseCanvas(owner)).board.comments.find(comment => comment.id === 'muse-welcome').author, 'Muze', 'custom welcome comments retain their author');
 });
 
 test('reopening an older renamed notebook repairs only its exact default soul introduction once', async () => {
@@ -151,15 +155,18 @@ test('reopening an older renamed notebook repairs only its exact default soul in
 
 
 test('refreshing a renamed legacy default keeps the chosen Muse identity and custom suffix', async () => {
-  const {LEGACY_NOTE_TEMPLATES} = await import('../scripts/muse-defaults.mjs');
+  const {LEGACY_NOTE_TEMPLATES,PREVIOUS_NOTE_TEMPLATES,MUSE_NOTE_TEMPLATES} = await import('../scripts/muse-defaults.mjs');
   const owner='renamed-default-refresh';
   await saveMuseCanvas(owner,renameDraft(await readMuseCanvas(owner),'Kumo'));
-  const content=LEGACY_NOTE_TEMPLATES.soul.replace('I’m Muse,','I’m Kumo,')+'\nMy handwritten reminder.';
-  await writeFile(join(museDirectory(owner),'soul.md'),content);
-  const result=await readMuseCanvas(owner);
-  const soul=card(result,'muse-file-soul').markdown;
-  assert.equal(result.board.museName,'Kumo');
-  assert.match(soul,/I’m Kumo, your companion/);
-  assert.doesNotMatch(soul,/I’m Muse,|Make me yours/);
-  assert.match(soul,/My handwritten reminder/);
+  const suffix='\nMy handwritten reminder: Muze is mentioned in my history.\n\n<!-- muze-learned:start -->\nKeep my learned preferences.\n<!-- muze-learned:end -->\n';
+  for(const template of [LEGACY_NOTE_TEMPLATES.soul,PREVIOUS_NOTE_TEMPLATES.soul.split('\n\n## Make me yours')[0]+'\n']){
+    const content=template.replace('I’m Muse,','I’m Kumo,')+suffix;
+    await writeFile(join(museDirectory(owner),'soul.md'),content);
+    const result=await readMuseCanvas(owner);
+    const soul=card(result,'muse-file-soul').markdown;
+    assert.equal(result.board.museName,'Kumo');
+    assert.equal(soul,MUSE_NOTE_TEMPLATES.soul.replace('I’m Muse,','I’m Kumo,')+suffix);
+    assert.match(soul,/I’m Kumo, your companion inside Tomo\./);
+    assert.doesNotMatch(soul,/I’m Muse,|Make me yours/);
+  }
 });

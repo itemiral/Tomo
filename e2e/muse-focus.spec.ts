@@ -74,7 +74,7 @@ test('a late reply cannot suggest work for a selection the person has left',asyn
 
 test('stopping while the notebook saves prevents the model request',async({page})=>{
  const fixture=await museFixture(page);await page.getByRole('button',{name:'Open Muse',exact:true}).click();await page.getByRole('button',{name:'Edit Muse',exact:true}).click();
- await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','true');
+ await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','true');
  let release!:()=>void,entered=false,calls=0;const gate=new Promise<void>(resolve=>{release=resolve;});
  fixture.canvasSave(async()=>{entered=true;await gate;});fixture.response(async()=>{calls++;return {cards:[],updates:[]};});
  await page.getByRole('button',{name:'Note',exact:true}).click();await page.mouse.click(850,650);const note=page.locator('textarea[data-fabric="textarea"]');await note.fill('Keep my next steps short.');await note.press('Escape');

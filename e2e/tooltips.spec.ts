@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 for (const width of [1440, 390]) test(`tool descriptions stay above the composer and inside the viewport at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await page.goto('/');
-  await expect(page.getByRole('main', { name: 'Muze', exact: true })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo', exact: true })).toHaveAttribute('data-ready', 'true');
   const composer = page.locator('.muse-chat-stack');
   const before = await composer.boundingBox();
   const draw = page.getByRole('button', { name: 'Draw', exact: true });
@@ -30,7 +30,7 @@ for (const width of [1440, 390]) test(`tool descriptions stay above the composer
 
 test('keyboard tool descriptions dismiss with Escape without changing the tool', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('main', { name: 'Muze', exact: true })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo', exact: true })).toHaveAttribute('data-ready', 'true');
   await page.keyboard.press('Tab');
   const hand = page.getByRole('button', { name: 'Hand', exact: true });
   await hand.focus();
@@ -46,7 +46,7 @@ test('keyboard tool descriptions dismiss with Escape without changing the tool',
 for (const width of [320,390]) test(`signed-out phone header leaves grid controls reachable at ${width}px`, async ({page}) => {
   await page.setViewportSize({width,height:844});
   await page.goto('/');
-  await expect(page.getByRole('main',{name:'Muze',exact:true})).toHaveAttribute('data-ready','true');
+  await expect(page.getByRole('main',{name:'Tomo',exact:true})).toHaveAttribute('data-ready','true');
   await expect(page.getByRole('button',{name:'Sign in to share',exact:true})).toBeVisible();
   const grid=page.getByRole('button',{name:'Toggle grid',exact:true});
   await expect(grid).toHaveAttribute('aria-pressed','true');
@@ -58,6 +58,6 @@ for (const width of [320,390]) test(`signed-out phone header leaves grid control
   await expect(page.getByRole('menuitem',{name:'New board',exact:true})).toBeVisible();
   await page.keyboard.press('Escape');
   await page.reload();
-  await expect(page.getByRole('main',{name:'Muze',exact:true})).toHaveAttribute('data-ready','true');
+  await expect(page.getByRole('main',{name:'Tomo',exact:true})).toHaveAttribute('data-ready','true');
   await expect(grid).toHaveAttribute('aria-pressed','false');
 });

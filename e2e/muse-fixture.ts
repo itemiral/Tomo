@@ -103,7 +103,7 @@ export async function museFixture(page: Page, initialNotes:Partial<Record<'soul'
     return route.fulfill({ status: 404, json: { error: 'Not found' } });
   });
   await page.goto('/__muse-fixture');
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   await expect(page.getByRole('button', { name: 'Open Muse' })).toBeVisible();
   return {
     notes, canvases,
@@ -115,7 +115,7 @@ export async function museFixture(page: Page, initialNotes:Partial<Record<'soul'
 export async function exported(page: Page) {
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
-  await page.getByRole('menuitem', { name: 'Save editable copy (.muze)', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Save editable copy (.tomo)', exact: true }).click();
   const text = await readFile((await (await pending).path())!, 'utf8');
   const data = JSON.parse(text);
   return { text, objects: data.board.pages.find((page: { id: string }) => page.id === data.board.activePage).objects as { type: string; markdown?:string; id: string; text: string; left: number; top: number; width: number; height: number }[], viewport: data.board.pages[0].viewport as number[] };

@@ -195,7 +195,7 @@ test('a generated WebP image saves to the shared board, reaches an invited edito
     await peer.addInitScript(() => { (window as any).fixtureOwner = 'owner-b'; });
     await peer.route('**/__muse-fixture?*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><link rel="stylesheet" href="/__fixture.css"><div id="root"></div><script src="/__fixture.js"></script>' }));
     await peer.reload();
-    await expect(peer.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+    await expect(peer.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
     await expect(peerImage).toBeVisible();
     expect((await exported(peer)).objects.find(object => object.id === imageId)).toMatchObject({ type: 'Image', src });
     expect(JSON.stringify(api.saves)).not.toMatch(/muse-file-soul|muse-file-memory|muse-private/);
@@ -229,7 +229,7 @@ test('the private Muse notebook does not expose an invitation action', async ({ 
   const api = sharedApi(); await api.attach(page, () => 'owner-a'); await museFixture(page);
   await page.getByRole('button', { name: 'Open Muse', exact: true }).click();
   await page.getByRole('dialog', { name: 'Muse', exact: true }).getByRole('button', { name: 'Edit Muse', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-muse-board', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-muse-board', 'true');
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create invite link', exact: true })).toHaveCount(0);
   expect(api.published).toHaveLength(0);
@@ -285,7 +285,7 @@ test('an invite stays pending while signed out and joins the account that signs 
     expect(new URLSearchParams(new URL(guest.url()).hash.slice(1)).get('invite')).toBe(token);
     expect(api.joins).toEqual([]);
     actor = 'owner-b'; await fixture.owner(actor);
-    await expect(guest.getByRole('main', { name: 'Muze', exact: true })).toHaveAttribute('data-ready', 'true');
+    await expect(guest.getByRole('main', { name: 'Tomo', exact: true })).toHaveAttribute('data-ready', 'true');
     await expect.poll(() => new URL(guest.url()).hash).toBe('');
     expect(api.joins).toEqual(['owner-b']);
   } finally { await context.close(); }

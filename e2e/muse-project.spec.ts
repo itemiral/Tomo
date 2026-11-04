@@ -8,7 +8,7 @@ const note = (id: string, text: string, left = 240, top = 200) => ({ type: 'Muze
 async function openBoard(page: Page, objects: Record<string, unknown>[], extras: Record<string, unknown> = {}) {
   const board = { id: 'project-fixture', name: 'Community workshop', activePage: 'page-main', pages: [{ id: 'page-main', name: 'Overview', objects, viewport: [1, 0, 0, 1, 0, 0] }], ...extras };
   await page.getByLabel('Open a board file', { exact: true }).setInputFiles({ name: 'project.muze', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ format: 'muze', version: 1, board })) });
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   await expect(page.getByRole('textbox', { name: 'Board name', exact: true })).toHaveValue('Community workshop');
 }
 
@@ -49,7 +49,7 @@ test('a turn reads related pages and ordinary comments while keeping the private
   await expect(page.getByRole('textbox', { name: 'Message Muse' })).toBeEnabled();
   await page.getByRole('button', { name: 'Open Muse', exact: true }).click();
   await page.getByRole('dialog', { name: 'Muse', exact: true }).getByRole('button', { name: 'Edit Muse', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-muse-board', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-muse-board', 'true');
   await send(page, 'Summarize my notebook preferences');
   await expect.poll(() => requests.length).toBe(2);
   const privateProject = JSON.parse(requests[1].project!);

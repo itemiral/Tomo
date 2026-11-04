@@ -19,7 +19,7 @@ function BoardToolConnection({boardId,flush}:{boardId:string;flush:()=>Promise<v
     try{
       await flush();
       const {token}=await boardRequest<{token:string}>('/'+boardId+'/mcp',{method:'POST'});
-      setConfiguration(JSON.stringify({mcpServers:{muze:{url:new URL('/api/mcp/boards/'+boardId,location.origin).href,headers:{Authorization:'Bearer '+token}}}},null,2));setEnabled(true);
+      setConfiguration(JSON.stringify({mcpServers:{tomo:{url:new URL('/api/mcp/boards/'+boardId,location.origin).href,headers:{Authorization:'Bearer '+token}}}},null,2));setEnabled(true);
     }catch(cause){setError((cause as Error).message);}finally{setBusy(false);}
   }
   async function revoke(){setBusy(true);setError('');try{await boardRequest('/'+boardId+'/mcp',{method:'DELETE'});setConfiguration('');setEnabled(false);setCopied(false);}catch(cause){setError((cause as Error).message);}finally{setBusy(false);}}

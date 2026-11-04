@@ -59,13 +59,13 @@ test('Muse looks toward the pointer, floats through open space, and can be grabb
   await muse.press('Enter');
   await expect(page.getByRole('dialog',{name:'Muse',exact:true})).toBeVisible();
   await page.getByRole('dialog',{name:'Muse',exact:true}).getByRole('button',{name:'Edit Muse',exact:true}).click();
-  await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','true');
+  await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','true');
 });
 
 test('canonical documents edit on the actual canvas and persist without entering ordinary exports', async ({page})=>{
  const fixture=await museFixture(page);
  await openMuseEditor(page);
- await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-ready','true');
+ await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-ready','true');
  await page.mouse.dblclick(300,250);
  const input=page.locator('textarea[data-fabric="textarea"]');
  await expect(input).toBeAttached();await input.fill('# My own way\n\nKeep explanations brief.');await input.press('Escape');
@@ -80,7 +80,7 @@ test('canonical documents edit on the actual canvas and persist without entering
 
 test('account changes clear private canvas and chat',async({page})=>{
  const fixture=await museFixture(page);await openMuseEditor(page);
- await fixture.owner('owner-b');await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','false');
+ await fixture.owner('owner-b');await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','false');
  await openMuseEditor(page);
  expect((await exported(page)).text).not.toContain('owner-a');
 });
@@ -200,7 +200,7 @@ test('bottom chat precedes More; comments persist on ordinary boards', async ({p
 
 test('special notebook uses normal tools, local media, comments and visible unsupported-drop errors',async({page})=>{
  const fixture=await museFixture(page);await openMuseEditor(page);
- await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-ready','true');
+ await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-ready','true');
  await page.getByRole('button',{name:'Rectangle',exact:true}).click();await page.mouse.move(950,450);await page.mouse.down();await page.mouse.move(1100,550);await page.mouse.up();
  await expect.poll(()=>fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBeGreaterThan(4);
  await page.getByRole('button',{name:'Undo',exact:true}).click();
@@ -228,7 +228,7 @@ test('shared documents create, edit, move, resize and survive reload on ordinary
  const fixture=await museFixture(page);
  for(const special of [false,true]) {
   if(special)await openMuseEditor(page);
-  await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-ready','true');
+  await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-ready','true');
   await page.getByRole('button',{name:'More tools',exact:true}).click();await page.getByRole('button',{name:'Add document',exact:true}).click();
   let snapshot=await exported(page);let doc=snapshot.objects.find(o=>o.type==='MuzeDocument'&&!o.id.startsWith('muse-file-'))!;
   expect(doc).toBeTruthy();
@@ -246,7 +246,7 @@ test('shared documents create, edit, move, resize and survive reload on ordinary
   await page.mouse.move(right,middle);await page.mouse.down();await page.mouse.move(right+55,middle,{steps:8});await page.mouse.up();
   const resized=(await exported(page)).objects.find(o=>o.id===doc.id)!;expect(resized.width).toBeGreaterThan(doc.width);
   if(special)await expect(page.locator('.muse-save-status')).toHaveText('Saved');
-  await page.reload();await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-ready','true');
+  await page.reload();await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-ready','true');
   if(special)await openMuseEditor(page);
   const restored=(await exported(page)).text;expect(restored).toContain('Remember');expect(restored).toContain('MuzeDocument');
   if(!special)expect(fixture.canvases.get('owner-a')?.board.pages[0].objects.length).toBe(4);
@@ -271,7 +271,7 @@ test('Markdown imports use shared document elements and do not fetch embedded im
 
  test('Muse popup opens before Edit, dismisses, and reopens after returning',async({page})=>{
   await museFixture(page);
-  const character=page.getByRole('button',{name:'Open Muse',exact:true}), popup=page.getByRole('dialog',{name:'Muse',exact:true}), board=page.getByRole('main',{name:'Muze'});
+  const character=page.getByRole('button',{name:'Open Muse',exact:true}), popup=page.getByRole('dialog',{name:'Muse',exact:true}), board=page.getByRole('main',{name:'Tomo'});
   await character.click();await expect(popup).toBeVisible();await expect(board).toHaveAttribute('data-muse-board','false');
   await page.keyboard.press('Escape');await expect(popup).toBeHidden();await expect(character).toBeFocused();
   await character.click();await page.mouse.click(700,100);await expect(popup).toBeHidden();
@@ -320,8 +320,8 @@ test('anchored comments follow pan and zoom, persist, edit, cancel and reopen on
 test('Muse popup exposes chat and opens avatar controls through its existing board',async({page})=>{
  await museFixture(page);const character=page.getByRole('button',{name:'Open Muse',exact:true}),popup=page.getByRole('dialog',{name:'Muse',exact:true});
  await character.click();await expect(popup.getByRole('button',{name:'Edit Muse',exact:true})).toBeVisible();await expect(popup.getByRole('button',{name:'Change avatar',exact:true})).toBeVisible();
- await popup.getByRole('button',{name:'Chat',exact:true}).click();await expect(page.locator('.muse-chat-messages')).toBeVisible();await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','false');await page.getByRole('button',{name:'Close Muse chat'}).click();
- await character.click();await popup.getByRole('button',{name:'Change avatar',exact:true}).click();await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','true');await expect(page.getByRole('button',{name:'Change Muse icon',exact:true})).toBeVisible();await expect(page.locator('.muze-vector-surface [id="muse-appearance"]')).toBeVisible();
+ await popup.getByRole('button',{name:'Chat',exact:true}).click();await expect(page.locator('.muse-chat-messages')).toBeVisible();await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','false');await page.getByRole('button',{name:'Close Muse chat'}).click();
+ await character.click();await popup.getByRole('button',{name:'Change avatar',exact:true}).click();await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','true');await expect(page.getByRole('button',{name:'Change Muse icon',exact:true})).toBeVisible();await expect(page.locator('.muze-vector-surface [id="muse-appearance"]')).toBeVisible();
  await page.getByRole('button',{name:'Back to whiteboard'}).click();await character.click();await page.screenshot({path:'verification/muse-actions-desktop.png'});await page.setViewportSize({width:390,height:844});await page.screenshot({path:'verification/muse-actions-mobile.png'});
 });
 
@@ -408,7 +408,7 @@ test('pending notebook preferences save before leaving and remain available to w
  const fixture=await museFixture(page);await openMuseEditor(page);
  let release!:()=>void,entered=false;const gate=new Promise<void>(resolve=>release=resolve);fixture.canvasSave(async()=>{entered=true;await gate;});
  await page.getByRole('button',{name:'Note',exact:true}).click();await page.mouse.click(850,650);const input=page.locator('textarea[data-fabric="textarea"]');await input.fill('Please sound like a cat. Meow occasionally.');await input.press('Escape');
- await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect.poll(()=>entered).toBe(true);await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','true');release();fixture.canvasSave(async()=>{});await expect(page.getByRole('main',{name:'Muze'})).toHaveAttribute('data-muse-board','false');
+ await page.getByRole('button',{name:'Back to whiteboard'}).click();await expect.poll(()=>entered).toBe(true);await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','true');release();fixture.canvasSave(async()=>{});await expect(page.getByRole('main',{name:'Tomo'})).toHaveAttribute('data-muse-board','false');
  let contextIncluded=false;fixture.response(async()=>{contextIncluded=JSON.stringify(fixture.canvases.get('owner-a')?.board).includes('Please sound like a cat.');return {cards:[],updates:[]};});await send(page,'Hello');await expect.poll(()=>contextIncluded).toBe(true);await page.reload();await openMuseEditor(page);expect((await exported(page)).text).toContain('Please sound like a cat.');
 });
 
