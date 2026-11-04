@@ -39,6 +39,7 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
     setBusy(true); setError(''); setText(''); setPending(message); setSuggestions([]); setPhase('context'); onThinking(true,selectedIds,'context');
     const abort = new AbortController(); controller.current = abort;
     let lease: ReturnType<typeof museRequestLease> | undefined;
+    let completed = false;
     try {
       let packet: MusePreparedContext = {board: boardContext}, requestFocus: string[] = [];
       let result!: {messages: Message[]; actions: MuseActions; suggestions?: string[]; personalizationUpdated?: boolean};
@@ -74,13 +75,23 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
         setMessages(result.messages);
         if(currentSelection.current===JSON.stringify([...requestFocus].sort()))setSuggestions(Array.isArray(result.suggestions)?[...new Set(result.suggestions.filter(value=>typeof value==='string'&&value.trim()&&value.length<=100).map(value=>value.trim()))].slice(0,2):[]);
         if(result.personalizationUpdated)window.dispatchEvent(new CustomEvent('muse-personalization-updated',{detail:{ownerId:profile.ownerId}}));
+        completed = true;
       }
     } catch (cause) {
       if (!mounted.current) return;
       if (abort.signal.aborted) { if (cause instanceof MuseStopError && !controller.current) setError(cause.message); return; }
       onThinking(false); setText(value=>value.trim()?value:message);
       if (cause instanceof RequestError && cause.status === 401) locked(); else setError((cause as Error).message);
-    } finally { await lease?.release(); if (mounted.current && controller.current === abort) { controller.current=null;setBusy(false); setPending(''); } }
+    } finally {
+      await lease?.release();
+      if (mounted.current && controller.current === abort) {
+        controller.current=null;setBusy(false);setPending('');
+        if (completed && !abort.signal.aborted && !input.current?.value.trim()) {
+          input.current?.blur();
+          close();
+        }
+      }
+    }
   }
   async function image(file: File) {
     if (imageController.current) return;

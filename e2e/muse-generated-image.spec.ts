@@ -33,6 +33,9 @@ test('Muse WebP generation becomes a real saved canvas image with one undoable b
   await museFixture(page);
   const src = await generatedImage(); expect(src).toMatch(/^data:image\/webp;base64,/);
   await response(page, src, true); await chat(page); await send(page, 'Draw a banana with a face');
+  await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
+  await chat(page);
   await expect(page.getByText(reply, { exact: true })).toBeVisible();
   const board = await exported(page), image = board.objects.find(object => object.id === 'generated-banana');
   expect(image).toMatchObject({ type: 'Image', src, sourceTitle: 'Generated with Muse', width: 640, height: 480 });
@@ -54,6 +57,9 @@ test('chat waits for generated image decoding before displaying the result', asy
   await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toBeVisible();
   expect((await exported(page)).objects).toHaveLength(0);
   await page.evaluate(() => (window as any).releaseGeneratedImage());
+  await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
+  await chat(page);
   await expect(page.getByText(reply, { exact: true })).toBeVisible();
   expect((await exported(page)).objects.find(object => object.id === 'generated-banana')?.type).toBe('Image');
 });
@@ -62,6 +68,7 @@ for (const src of ['data:image/webp;base64,aW52YWxpZCBwaXhlbHM=', 'https://examp
   test(`an unusable ${src.startsWith('data:') ? 'image' : 'image URL'} cannot produce a success reply or partial board edit`, async ({ page }) => {
     await museFixture(page); await response(page, src, true); await chat(page); await send(page, 'Draw a banana with a face');
     await expect(page.locator('.muse-chat-error')).toBeVisible();
+    await expect(page.locator('.muse-chat')).not.toHaveClass(/collapsed/);
     await expect(page.getByText(reply, { exact: true })).toHaveCount(0);
     expect((await exported(page)).objects).toHaveLength(0);
   });

@@ -1,5 +1,5 @@
 import {expect,test,type Page} from '@playwright/test';
-import {exported,museFixture,send} from './muse-fixture';
+import {chat,exported,museFixture,send} from './muse-fixture';
 
 async function selectNote(page:Page,id:string,extend=false){
  const note=page.locator(`.muze-vector-surface [id="${id}"]`);await expect(note).toBeVisible();const box=(await note.boundingBox())!;
@@ -23,6 +23,8 @@ for(const width of [1440,390])test(`selected revisions stay scoped and preserve 
  await expect(page.locator(`.muse-working-target[data-target-id="${first.id}"]`)).toBeVisible();
  await expect(page.locator('.muse-floating')).toHaveClass(/working/);
  release();
+ await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);
+ await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await chat(page);
  await expect(page.getByText('Kept 1 card you changed or locked.')).toBeVisible();
  await expect(page.locator('.muse-floating')).not.toHaveClass(/working/);
  const revised=await exported(page);
@@ -51,11 +53,15 @@ test('next moves require a click, preserve drafts, and clear when selection chan
  const fixture=await museFixture(page);let calls=0,request='';
  fixture.response(async(body)=>{calls++;request=body.message;return {cards:[{id:'followup-note',title:'First step',body:'Pick one outcome.'}],updates:[],suggestions:['Find what is missing','Make the next step smaller']};});
  await send(page,'Help me get started');
+ await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);
+ await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await chat(page);
  const next=page.getByRole('button',{name:'Find what is missing',exact:true});await expect(next).toBeVisible();expect(calls).toBe(1);
  const input=page.getByRole('textbox',{name:'Message Muse'});await input.fill('My own next step');await expect(next).toBeHidden();await expect(input).toHaveValue('My own next step');
  await input.fill('');await expect(next).toBeVisible();
  fixture.response(async(body)=>{calls++;request=body.message;return {cards:[],updates:[],suggestions:['Choose a deadline']};});
  await next.click();await expect.poll(()=>calls).toBe(2);expect(request).toBe('Find what is missing');
+ await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);
+ await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await chat(page);
  await expect(page.getByRole('button',{name:'Choose a deadline',exact:true})).toBeVisible();
  expect((await exported(page)).text).not.toContain('Choose a deadline');
  await selectNote(page,'followup-note');await expect(page.getByRole('button',{name:'Choose a deadline',exact:true})).toHaveCount(0);
