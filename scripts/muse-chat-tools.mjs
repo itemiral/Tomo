@@ -9,6 +9,12 @@ import {generateBoardImage} from './muse-image-generate.mjs';
 import {planMuseTools} from './muse-tool-plan.mjs';
 import {readToolJson,publicToolText} from './muse-tool-http.mjs';
 
+function needsPublicFacts(text){
+ const currentFact=/\b(?:latest|current|today|live|real[- ]time|up[- ]to[- ]date)\b/i.test(text);
+ const marketFact=/\b(?:prices?|costs?|fares?|rates?|availability|available|flights?|hotels?|tickets?)\b|\bin stock\b|\bopening hours\b/i.test(text);
+ return currentFact||marketFact;
+}
+
 export function toolRestrictions(message){
  const text=message.replace(/[’‘]/g,"'");
  const offline=/\b(?:do not|don't|dont|never|avoid|skip|no need to)\s+(?:please\s+)?(?:search(?:ing)?|look(?:ing)?\s*up|brows(?:e|ing)|research(?:ing)?|(?:use|using)\s+(?:the\s+)?(?:web|internet|online))\b|\b(?:no|without)\s+(?:web(?:\s+search)?|internet|online\s+(?:search|research)|browsing|research|search(?:ing)?|looking\s*up)\b|\b(?:stay|work|remain|answer|keep it)\s+offline\b|\boffline\s+only\b|\b(?:(?:use|using)\s+(?:only|just)|only\s+use)\s+(?:(?:my|our|the|these|those|selected)\s+)?(?:notes|cards|board|text|documents?|selection)\b/i.test(text);
@@ -27,22 +33,34 @@ export function toolIntent(message){
  const text=message.replace(/[’‘]/g,"'");
  const explicitSearch=/\b(?:search|look\s*up|browse|research)\b/i.test(text);
  const request=/\b(?:find|check|compare|show|tell me|give me|get|fetch|recommend|suggest)\b|^(?:please\s+)?(?:what|which|where|when|how|is|are|does|do|can|could|would)\b/i.test(text);
- const currentFact=/\b(?:latest|current|today|live|real[- ]time|up[- ]to[- ]date)\b/i.test(text);
- const marketFact=/\b(?:prices?|costs?|fares?|rates?|availability|available|flights?|hotels?|tickets?)\b|\bin stock\b|\bopening hours\b/i.test(text);
  const publicBrief=/^(?:latest|current|live|up[- ]to[- ]date)\b/i.test(text);
  const images=/\b(?:add|insert|find|fetch|get|show|search|put|place|bring)\b[\s\S]*\b(?:images?|photos?|pictures?)\b|\b(?:images?|photos?|pictures?)\b[\s\S]*\b(?:on|onto|to)\s+(?:the |my )?board\b/i.test(message)||imageLinks(message).length>0;
- return {images,search:explicitSearch||publicBrief||request&&(currentFact||marketFact)};
+ return {images,search:explicitSearch||publicBrief||request&&needsPublicFacts(text)};
 }
 
-function explicitImageSubject(message){
+function imageRequestSubject(message){
  const match=message.trim().match(/^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:generate|create|draw|make|design|render|illustrate)\s+(?:(?:me|for me)\s+)?(?:(?:an?|the)\s+)?(?:image|picture|illustration|logo|poster|artwork|photo)\s+(?:of|showing|depicting)\s+(.+)$/is);
- const subject=match?.[1].replace(/[.!?]+$/,'').trim();
- return !!subject&&!/^(?:it|this|that|these|those|something|anything)$/i.test(subject);
+ return match?.[1].replace(/[.!?]+$/,'').trim()||null;
+}
+function qualifiedImageRequest(subject){
+ return /\b(?:if|unless|whether|instead|rather|but|then|also|capabilities|hypothetical|explain|describe|without|never)\b|[;.!?]\s+\w|\b(?:do not|don['’]?t)\b|\b(?:and)\s+(?:please\s+)?(?:search|research|find|look|check|tell|ask)\b|\b(?:can you|are you able|is it possible|how to|not now|not yet|no tools|just asking|just kidding)\b/i.test(subject)||/^(?:something|anything|any\s+(?:size|style|kind)|different\s+(?:sizes|styles))(?:\s|$)/i.test(subject);
+}
+function explicitImagePrompt(message){
+ const subject=imageRequestSubject(message);
+ if(!subject||subject.length<2||message.length>2000)return null;
+ // The fast path requires the current message to supply the whole subject.
+ // References, capability questions, conditions and mixed tasks need the planner.
+ if(qualifiedImageRequest(subject)||/\b(?:this|that|these|those|it|them|here|there|above|same|again|selected|attached|previous|my|our|your|his|her|their)\b|https?:\/\//i.test(subject))return null;
+ const prompt=publicToolText(subject,2000);
+ return prompt&&prompt!=='[private]'?prompt:null;
 }
 
 export async function resolveToolPlan(message,context,signal,planner=planMuseTools){
  const restrictions=toolRestrictions(message);
  if(restrictions.offline||restrictions.local)return {action:'none',query:''};
+ signal.throwIfAborted();
+ const imagePrompt=explicitImagePrompt(message);
+ if(imagePrompt)return {action:'image_generate',query:imagePrompt};
  const intent=toolIntent(message),urls=imageLinks(message);
  if(urls.length)return {action:'image_search',query:message};
  const contextual=/\b(?:this|that|these|those|it|them|here|there|above|same|again)\b/i.test(message);
@@ -53,15 +71,21 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
  if(intent.search&&!intent.images&&!contextual&&!nonEnglish&&!restrictions.personal&&message.length<=600)return {action:'research',query:publicToolText(message)};
  const localChat=/^(?:hi|hello|hey|thanks|thank you|yes|no|ok|okay)[.! ]*$/i.test(message)||/^(?:please )?(?:outline|brainstorm|organize|summarize|explain|continue|make (?:this|it|these) (?:concise|shorter|clearer)|add (?:a )?(?:note|card))\b/i.test(message);
  const publicOptions=/\b(?:recommend|suggest|best|nearby|hotels?|restaurants?|flights?|venues?|tickets?|products?|destinations?|travel|trip|vacation|weather|prices?|latest|availability)\b/i.test(message);
- if(!intent.search&&!intent.images&&!generation&&!nonEnglish&&localChat&&!publicOptions)return {action:'none',query:''};
+ // A rough plan can still be useful without a lookup. This changes only failure
+ // recovery: successful routing still researches public options as usual.
+ const ordinaryPlanning=/\b(?:plan|planning|outline|organize|brainstorm)\b|\bmake\s+(?:a|the|our|my)\s+trip\b/i.test(message)&&!needsPublicFacts(message);
+ const recentImageRequest=(context?.history||[]).slice(-4).some(item=>item.role==='user'&&(imageRequestSubject(item.content)||toolIntent(item.content).images||/\b(?:draw|illustrate|render)\b/i.test(item.content)));
+ const imageContinuation=recentImageRequest&&!ordinaryPlanning;
+ if(!intent.search&&!intent.images&&!generation&&!nonEnglish&&!imageContinuation&&localChat&&!publicOptions&&!needsPublicFacts(message))return {action:'none',query:''};
  try{
   const plan=await planner(message,context,signal);
-  // An unmistakable image request cannot fall through to a text-only success.
-  // Do not guess a prompt or retry a paid tool when selection did not succeed.
-  if(plan.action==='none'&&explicitImageSubject(message))throw new MuseStoreError(502,'Muse did not prepare an image for this request. Try again.');
+  const subject=imageRequestSubject(message);
+  // A concrete image request must not become an unsupported text-only success.
+  if(plan.action==='none'&&subject&&!qualifiedImageRequest(subject)&&!/^(?:it|this|that|these|those)$/i.test(subject))throw new MuseStoreError(502,'Muse did not prepare an image for this request. Try again.');
   return plan;
  }catch(error){
-  if(signal.aborted||intent.search||intent.images||generation||nonEnglish||publicOptions)throw error;
+  const unavailableAccount=['auth','configuration'].includes(error?.kind)||[401,403,429].includes(error?.status);
+  if(signal.aborted||unavailableAccount||intent.search||intent.images||generation||nonEnglish||imageContinuation||needsPublicFacts(message)||publicOptions&&!ordinaryPlanning)throw error;
   return {action:'none',query:'',notice:'Tool selection was unavailable. No web search, image lookup or generation ran. Answer ordinary questions from the supplied context or general knowledge. Do not claim current facts were verified or images prepared; if this request needs a tool, explain that the lookup could not run.'};
  }
 }
