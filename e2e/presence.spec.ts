@@ -221,19 +221,19 @@ test('Muse targets are public metadata only and page changes, private notebooks,
   } finally { await a.close(); await b.close(); }
 });
 
-test('peer Muses follow shared work targets across pan and zoom without covering controls or increasing presence traffic',async({browser})=>{
+test('peer Muses stay in their roster while work outlines follow pan and zoom without increasing presence traffic',async({browser})=>{
  const bus=transport(),a=await browser.newContext(),b=await browser.newContext();
  try{
   const ada=await a.newPage(),bo=await b.newPage();await ada.clock.install();await fixture(ada,bus,'ada');await fixture(bo,bus,'bo');
   await expect(bo.getByLabel('People on this board')).toContainText('Ada');
   await ada.getByRole('button',{name:'Work on first note',exact:true}).click();await ada.clock.runFor(2100);
   const target=bo.locator('.board-muse-targets [data-target-id="note-one"]'),outline=target.locator('.board-muse-target-outline');
-  await expect(target).toHaveCount(1);await expect(bo.locator('.board-peer-muses').getByLabel('Ada’s Muse, working',{exact:true})).toHaveCount(0);
+  await expect(target).toHaveCount(1);await expect(bo.locator('.board-peer-muses').getByLabel('Ada’s Muse, working',{exact:true})).toBeVisible();
   const before=(await outline.boundingBox())!;expect(before.x).toBe(194);expect(before.y).toBe(154);
-  const badge=(await target.locator('.board-muse-target-avatar').boundingBox())!;expect(badge.x).toBeGreaterThanOrEqual(380);expect(badge.width).toBe(40);
+  await expect(bo.locator('.board-muse-target-avatar')).toHaveCount(0);const roster=bo.locator('.board-peer-muses'),resting=(await roster.boundingBox())!;expect(resting.x).toBeGreaterThan(1000);expect(await roster.locator('.board-peer-muse-icon').evaluate(element=>getComputedStyle(element).animationName)).toBe('none');
   const layer=await bo.locator('.board-muse-targets').evaluate(el=>({z:Number(getComputedStyle(el).zIndex),passive:[el,...el.querySelectorAll('*')].every(item=>getComputedStyle(item).pointerEvents==='none')}));expect(layer.z).toBeLessThan(8);expect(layer.passive).toBe(true);
   await bo.screenshot({path:'/tmp/muze-peer-work-target.png'});
-  await bo.getByRole('button',{name:'Pan and zoom',exact:true}).click();await expect.poll(async()=>Math.round((await outline.boundingBox())!.x)).toBe(174);expect(Math.round((await outline.boundingBox())!.y)).toBe(114);
+  await bo.getByRole('button',{name:'Pan and zoom',exact:true}).click();await expect.poll(async()=>Math.round((await outline.boundingBox())!.x)).toBe(174);expect(Math.round((await outline.boundingBox())!.y)).toBe(114);expect(await roster.boundingBox()).toEqual(resting);
   for(let index=0;index<5;index++){await ada.getByRole('button',{name:'Work on second note',exact:true}).click();await ada.getByRole('button',{name:'Work on first note',exact:true}).click();}
   await ada.getByRole('button',{name:'Work on second note',exact:true}).click();await ada.clock.runFor(2100);
   await expect(bo.locator('.board-muse-targets [data-target-id="note-two"]')).toHaveCount(1);await expect(target).toHaveCount(0);

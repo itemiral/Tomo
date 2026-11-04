@@ -15,7 +15,7 @@ test('one Muse per verified owner, isolated notes, icons, and conversations', as
   assert.notEqual(a.id, b.id);
   assert.deepEqual(await store.ensureMuse('owner-a'), a);
   const soul = await store.readMuseNote('owner-a', 'soul');
-  assert.match(soul.content, /Who I am/);
+  assert.equal(soul.content, '# Soul\n');
   await store.saveMuseNote('owner-a', 'soul', '# Private preference\nUse short steps.', soul.revision);
   assert.doesNotMatch((await store.readMuseNote('owner-b', 'soul')).content, /Private preference/);
   assert.equal((await store.readMuseNote('owner-a', 'soul')).content, '# Private preference\nUse short steps.');

@@ -54,7 +54,7 @@ test('renaming Muse updates the canonical introduction through successive names 
  for (const name of ['Kumo', 'Nova', 'Muse']) {
   snapshot = renameDraft(await readMuseCanvas(owner), name);
   const saved = await saveMuseCanvas(owner, snapshot);
-  const expected = initialSoul.replace('I’m Muse,', 'I’m ' + name + ',') + customBody;
+  const expected = 'My name is ' + name + '.\n\n' + initialSoul + customBody;
   assert.equal((await readMuseNote(owner, 'soul')).content, expected);
   assert.equal((await readMuseNote(owner, 'memory')).content, memory);
   const reloaded = await readMuseCanvas(owner);
@@ -127,7 +127,7 @@ test('saved default welcome comments adopt current copy while custom welcome com
 test('reopening an older renamed notebook repairs only its exact default soul introduction once', async () => {
  const owner = 'legacy-renamed-soul', snapshot = renameDraft(await readMuseCanvas(owner), 'Kumo');
  snapshot.board.museName = 'Kumo';
- const original = card(snapshot, 'muse-file-soul').markdown + '\n## Custom detail\nKeep this body and the word Muse unchanged.\n';
+ const original = '# Soul\n\n## Who I am\nI’m Muse, your companion inside Muze.\n\n## Custom detail\nKeep this body and the word Muse unchanged.\n';
  const path = join(museDirectory(owner), 'soul.md');
  await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
  await writeFile(path, original);

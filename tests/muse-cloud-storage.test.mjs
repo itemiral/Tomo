@@ -156,7 +156,7 @@ test('a cloud rename commits the name and soul together and keeps the other owne
   await withMuseStorage(owner, connection, () => saveMuseCanvas(owner, snapshot));
   assert.deepEqual(commits, [['canvas.json', 'soul.md']], 'name and soul must be written in one database transaction');
   assert.equal((await cloud(owner, () => ensureMuse(owner))).name, 'Kumo');
-  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, soulBefore.content.replace('I’m Muse,', 'I’m Kumo,'));
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, 'My name is Kumo.\n\n' + soulBefore.content);
   assert.equal((await cloud(owner, () => readMuseNote(owner, 'memory'))).content, memoryBefore.content);
   assert.deepEqual(await cloud(other, () => readMuseNote(other, 'soul')), otherBefore);
   assert.equal((await cloud(other, () => ensureMuse(other))).name, 'Muse');
@@ -164,7 +164,7 @@ test('a cloud rename commits the name and soul together and keeps the other owne
   reset.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Muse.';
   await cloud(owner, () => saveMuseCanvas(owner, reset));
   assert.equal((await cloud(owner, () => ensureMuse(owner))).name, 'Muse');
-  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, soulBefore.content, 'resetting the name must not trigger legacy repair with the previous name');
+  assert.equal((await cloud(owner, () => readMuseNote(owner, 'soul'))).content, 'My name is Muse.\n\n' + soulBefore.content, 'resetting the name must not trigger legacy repair with the previous name');
 });
 
 test('a soul edit between rename validation and cloud commit rolls back the name and all staged files', async () => {
@@ -199,7 +199,7 @@ test('opening a legacy cloud notebook repairs its default identity once and pres
   const snapshot = await cloud(owner, () => readMuseCanvas(owner));
   snapshot.board.museName = 'Kumo';
   snapshot.board.pages[0].objects.find(object => object.id === 'muse-name').text = 'Hello, my name is Kumo.';
-  const original = snapshot.board.pages[0].objects.find(object => object.id === 'muse-file-soul').markdown + '\n## Personal style\nMy reference to Muse stays unchanged.\n';
+  const original = '# Soul\n\n## Who I am\nI’m Muse, your companion inside Muze.\n\n## Personal style\nMy reference to Muse stays unchanged.\n';
   await cloud(owner, () => withStorageTransaction(async () => {
     await writeFile(join(museDirectory(owner), 'canvas.json'), JSON.stringify(snapshot.board));
     await writeFile(join(museDirectory(owner), 'soul.md'), original);

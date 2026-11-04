@@ -1,0 +1,50 @@
+import {expect,test} from '@playwright/test';
+import {museFixture,send} from './muse-fixture';
+
+test('Muse size fits a wide workspace and remembers each owner’s choice separately',async({page})=>{
+  await page.setViewportSize({width:2560,height:1440});
+  const fixture=await museFixture(page),muse=page.getByRole('button',{name:'Open Muse',exact:true});
+  await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+  expect((await muse.locator('.muse-avatar').boundingBox())!.width).toBeGreaterThanOrEqual(140);
+  await muse.click();
+  const setting=page.getByRole('group',{name:'Muse size'});
+  await setting.getByRole('button',{name:'Small',exact:true}).click();
+  await expect.poll(()=>muse.locator('.muse-avatar').evaluate(element=>(element as HTMLElement).offsetWidth)).toBe(88);
+  await page.reload();await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+  await expect(muse).toHaveAttribute('data-muse-size','small');
+  await fixture.owner('owner-b');await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+  await expect(muse).toHaveAttribute('data-muse-size','auto');
+  await muse.click();await setting.getByRole('button',{name:'Large',exact:true}).click();
+  await expect(muse).toHaveAttribute('data-muse-size','large');
+  await fixture.owner('owner-a');await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+  await expect(muse).toHaveAttribute('data-muse-size','small');
+  await muse.click();await setting.getByRole('button',{name:'Auto',exact:true}).click();await page.getByRole('button',{name:'Close Muse popup'}).click();
+  await send(page,'Outline a new project');
+  await expect(page.locator('.muse-message.assistant')).toBeVisible();
+  expect(await page.getByRole('textbox',{name:'Message Muse'}).evaluate(element=>parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+  await page.screenshot({path:'/tmp/muze-responsive-wide.png'});
+});
+
+test('a larger Muse remains movable and keeps its activity label within a phone screen',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  const fixture=await museFixture(page),muse=page.getByRole('button',{name:'Open Muse',exact:true});
+  await expect(page.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+  await muse.click();await page.getByRole('group',{name:'Muse size'}).getByRole('button',{name:'Large',exact:true}).click();
+  await page.getByRole('button',{name:'Close Muse popup'}).click();
+  await expect.poll(()=>muse.locator('.muse-avatar').evaluate(element=>(element as HTMLElement).offsetWidth)).toBe(84);
+  let release!:()=>void;
+  const waiting=new Promise<void>(resolve=>release=resolve);
+  fixture.response(async()=>{await waiting;return {cards:[],updates:[]};});
+  await send(page,'Consider the next step');
+  await expect(muse.locator('[role=status]')).toBeVisible();
+  const from=(await muse.boundingBox())!;
+  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();await page.mouse.move(380,660,{steps:10});await page.mouse.up();
+  const avatar=(await muse.boundingBox())!,label=(await muse.locator('[role=status]').boundingBox())!;
+  expect(avatar.x).toBeGreaterThanOrEqual(16);expect(avatar.x+avatar.width).toBeLessThanOrEqual(374);
+  expect(label.x).toBeGreaterThanOrEqual(7);expect(label.x+label.width).toBeLessThanOrEqual(383);expect(label.y+label.height).toBeLessThan(844);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+  await page.mouse.move(20,150);
+  await expect.poll(async()=>{const a=(await muse.boundingBox())!,b=(await page.getByRole('complementary',{name:'Chat with Muse'}).boundingBox())!;return Math.max(0,Math.min(a.x+a.width,b.x+b.width)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.height,b.y+b.height)-Math.max(a.y,b.y));}).toBe(0);
+  await page.screenshot({path:'/tmp/muze-responsive-phone.png'});
+  release();await expect(muse.locator('[role=status]')).toHaveCount(0);
+});

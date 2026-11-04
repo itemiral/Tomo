@@ -70,3 +70,14 @@ test('expiry requires a real quoted date on a temporary board memory', () => {
   }
   assert.match(selectPersonalizationContext({ ownerText: { soul: '', memory: '' }, entries: [], suppressed: [{ key: 'budget', target: 'memory', scope: 'board', deleted: true, expired: true }] }, message).instructions, /explicit renewal quoted from the current owner message/);
 });
+
+
+test('behavior observations are limited to working style and cannot infer profile facts', () => {
+  const message = 'Make this shorter.';
+  const input = update({basis: 'observed', evidence: message});
+  assert.equal(parsePersonalization({updates: [input]}, message).updates[0].basis, 'observed');
+  for (const patch of [{target: 'memory'}, {operation: 'forget'}, {basis: 'guess'}]) assert.equal(parsePersonalization({updates: [{...input, ...patch}]}, message).updates.length, 0);
+  const context = selectPersonalizationContext({ownerText:{soul:'# Soul',memory:'# Memory'},entries:[],observations:[{key:'detail',text:'Prefer concise replies.',count:2}]}, message);
+  assert.doesNotMatch(context.soul, /concise/);
+  assert.match(context.instructions, /not established preferences/);
+});

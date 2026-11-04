@@ -2,8 +2,9 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {parseBoardFile, type Board, type Drawing} from './storage';
 import {BoardConflict, mergeSharedBoard, mergeSharedDrawing, sameScene} from './shared-merge';
+import {MUSE_NOTES_PROTECTED, readProtectedObjects, removesProtectedObjects, restoreProtectedObjects, type ProtectedBoardObject} from '@/lib/shared-board-leases';
 
-export type SharedSnapshot = {board: Board; revision: string; role: 'owner' | 'editor'};
+export type SharedSnapshot = {board: Board; revision: string; role: 'owner' | 'editor'; protectedObjects?: ProtectedBoardObject[]};
 export type SharedListing = {id: string; name: string; role: 'owner' | 'editor'; updatedAt: string};
 class BoardRequestError extends Error { constructor(message: string, readonly status: number) {super(message);} }
 export async function boardRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -20,6 +21,7 @@ export async function boardRequest<T>(path: string, init: RequestInit = {}): Pro
       const id = data.board.id;
       if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id) || typeof data.revision !== 'string' || !['owner','editor'].includes(data.role)) throw new Error('This shared board could not be read.');
       data.board = {...parseBoardFile(JSON.stringify({format:'muze',version:1,board:data.board})),id};
+      data.protectedObjects = readProtectedObjects(data.protectedObjects);
     }
     return data;
   } catch (error) {
@@ -81,11 +83,19 @@ export function useSharedBoard(owner: string | undefined, canReceive: () => bool
             const merged=mergeSharedBoard(sent,draft.current!,result.board);base.current=result;draft.current=merged;publishView();setError('');
           }catch(cause){
             if(version!==epoch.current||expectedOwner!==account.current)return;
+            if(cause instanceof BoardRequestError&&cause.status===423&&attempts++<3){
+              const latest=await boardRequest<SharedSnapshot>('/'+saved.board.id);
+              if(version!==epoch.current||expectedOwner!==account.current)return;
+              const restored=restoreProtectedObjects(draft.current!,latest.board,latest.protectedObjects||[]);
+              draft.current=mergeSharedBoard(saved.board,restored,latest.board);base.current=latest;publishView();setError(MUSE_NOTES_PROTECTED);
+              continue;
+            }
             if(cause instanceof BoardRequestError&&cause.status===409&&attempts++<3){
               const latest=await boardRequest<SharedSnapshot>('/'+saved.board.id);
               if(version!==epoch.current||expectedOwner!==account.current)return;
               if(!receiver.current())throw new Error('Finish editing, then retry saving the board.');
-              draft.current=mergeSharedBoard(saved.board,draft.current!,latest.board);base.current=latest;publishView();
+              const restored=restoreProtectedObjects(draft.current!,latest.board,latest.protectedObjects||[]);
+              draft.current=mergeSharedBoard(saved.board,restored,latest.board);base.current=latest;publishView();
             }else throw cause;
           }
         }
@@ -123,7 +133,7 @@ export function useSharedBoard(owner: string | undefined, canReceive: () => bool
       try{
         const latest=await boardRequest<SharedSnapshot>('/'+previous.board.id,{signal:controller.signal});
         if(cancelled||version!==epoch.current||owner!==account.current||base.current!==previous||!receiver.current()||inFlight.current||!draft.current)return;
-        if(latest.revision!==previous.revision){draft.current=mergeSharedBoard(previous.board,draft.current,latest.board);base.current=latest;publishView();}
+        if(latest.revision!==previous.revision||JSON.stringify(latest.protectedObjects)!==JSON.stringify(previous.protectedObjects)){draft.current=mergeSharedBoard(previous.board,draft.current,latest.board);base.current=latest;publishView();}
         setError('');
       }catch(cause){if(!cancelled&&version===epoch.current){setError((cause as Error).message);if(cause instanceof BoardConflict){blocked.current=true;setConflict(true);}}}
       finally{polling=false;}
@@ -135,7 +145,10 @@ export function useSharedBoard(owner: string | undefined, canReceive: () => bool
   useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(base.current&&draft.current&&!sameScene(base.current.board,draft.current)){event.preventDefault();event.returnValue='';}};addEventListener('beforeunload',warn);return()=>removeEventListener('beforeunload',warn);},[]);
 
   const update=useCallback((change:(board:Board)=>Board)=>{
-    if(!draft.current||!account.current||storedOwner.current!==account.current)return;draft.current=change(draft.current);publishView();
+    if(!draft.current||!account.current||storedOwner.current!==account.current)return;
+    const next=change(draft.current);
+    if(removesProtectedObjects(draft.current,next,base.current?.protectedObjects||[])){draft.current={...draft.current};setError(MUSE_NOTES_PROTECTED);publishView();return;}
+    draft.current=next;publishView();
     if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>void flush().catch(()=>{}),400);
   },[flush,publishView]);
   const updateDrawing=useCallback((pageId:string,drawing:Drawing,previous?:Drawing)=>{
@@ -152,6 +165,15 @@ export function useSharedBoard(owner: string | undefined, canReceive: () => bool
       if(timer.current)clearTimeout(timer.current);publishView();
     }
   },[update,publishView]);
+  const refresh=useCallback(async()=>{
+    await flush();
+    const saved=base.current,version=epoch.current,expectedOwner=account.current;
+    if(!saved||!draft.current)return;
+    const latest=await boardRequest<SharedSnapshot>('/'+saved.board.id);
+    if(version!==epoch.current||expectedOwner!==account.current||base.current!==saved||!draft.current)throw new Error('The board changed. Try again.');
+    draft.current=mergeSharedBoard(saved.board,draft.current,latest.board);base.current=latest;publishView();
+  },[flush,publishView]);
+  const getSnapshot=useCallback(()=>base.current&&draft.current?{...base.current,board:draft.current}:null,[]);
   const open=useCallback(async(id:string|null)=>{
     const version=++navigation.current, owner=account.current;await flush();
     if(version!==navigation.current||owner!==account.current)throw new Error('The board or account changed. Open the board again.');
@@ -164,5 +186,5 @@ export function useSharedBoard(owner: string | undefined, canReceive: () => bool
   },[publishView]);
   const reload=useCallback(()=>{const id=route.id;if(!id)return;const version=epoch.current, expectedOwner=account.current;setBusy(true);const request=route.token?boardRequest<SharedSnapshot>('/join',{method:'POST',body:JSON.stringify({boardId:id,token:route.token})}):boardRequest<SharedSnapshot>('/'+id);void request.then(result=>{if(version!==epoch.current||expectedOwner!==account.current)return;base.current=result;draft.current=result.board;blocked.current=false;setConflict(false);setError('');setBusy(false);publishView();if(route.token){writeLocation(id);setRoute({id,token:null});}}).catch(cause=>{if(version===epoch.current&&expectedOwner===account.current){setError(cause.message);setBusy(false);}});},[route.id,route.token,publishView]);
   const snapshot=view.owner===owner?view.snapshot:null;
-  return {board:snapshot?.board||null,role:snapshot?.role,boardId:route.id,boards:owner&&view.owner===owner?boards:[],error,busy,conflict,update,updateDrawing,flush,open,publish,reload,refreshList};
+  return {board:snapshot?.board||null,role:snapshot?.role,boardId:route.id,protectedObjects:snapshot?.protectedObjects||[],boards:owner&&view.owner===owner?boards:[],error,busy,conflict,update,updateDrawing,flush,open,publish,reload,refreshList,refresh,getSnapshot};
 }

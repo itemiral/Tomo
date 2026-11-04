@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.23",
+    "@modelcontextprotocol/server": "2.4.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.118.0",
     "fabric": "7.4.0",
@@ -26,10 +27,12 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "roughjs": "^4.6.6",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.14",
+    "@modelcontextprotocol/client": "2.4.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22",
     "@types/react": "^19",

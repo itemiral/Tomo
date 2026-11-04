@@ -2,7 +2,7 @@ export type MuseActions = {
   layout?: 'organic' | 'aligned';
   focusIds?: string[];
   anchorIds?: string[];
-  images?: {id:string;src:string;sourceUrl:string;sourceTitle:string;retrievedAt:string;imageUrl?:string;attribution?:string}[];
+  images?: {id:string;src:string;sourceUrl?:string;sourceTitle:string;retrievedAt:string;imageUrl?:string;attribution?:string}[];
   cards: { id: string; title: string; body: string }[];
   updates: { id: string; text: string; expectedText: string }[];
 };

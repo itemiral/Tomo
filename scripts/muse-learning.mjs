@@ -10,6 +10,7 @@ export { DEFAULT_MUSE_STYLE };
 const START = '<!-- muze-learned:start -->', END = '<!-- muze-learned:end -->';
 const blockPattern = /<!-- muze-learned:start -->[\s\S]*?<!-- muze-learned:end -->/g;
 const entryPattern = /<!-- muze-entry:([a-f0-9]{24}):start -->\n([\s\S]*?)\n<!-- muze-entry:\1:end -->/g;
+const OBSERVATION_TTL = 90 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 160, MAX_RETIREMENTS = 512, MAX_LEARNING_BYTES = 4_000_000;
 const SUPPRESSION_BYTES = 8192;
 const emptyState = () => ({ version: 1, entries: [], lastTurnIds: [] });
@@ -35,6 +36,7 @@ function retireExpired(state) {
   return changed;
 }
 function compactState(state) {
+  state.observations = (state.observations || []).filter(item => Date.now() - item.updatedAt < OBSERVATION_TTL && !state.entries.some(entry => entry.id === item.id && (entry.deleted || entry.pinned || entry.basis !== 'observed'))).slice(-6);
   state.entries = state.entries.map(entry => {
     if (!entry.deleted && (entry.pinned || !entry.inactiveReason)) return entry;
     if (entry.deleted || entry.inactiveReason === 'expired') rememberSuppression(state, entry);
@@ -131,10 +133,11 @@ export async function readMuseLearning(owner, thread) {
     const conversation = await readMuseConversation(owner, thread);
     const revision = personalRevision(state, notes, thread.split(':')[0]);
     const context = view(state, notes, thread.split(':')[0]);
-    const normalize = content => content.replace(`I’m ${name}, your companion inside Muze.`, 'I’m Muse, your companion inside Muze.').trim().replace(/\n{3,}/g, '\n\n');
+    const normalize = content => content.replace(`My name is ${name}.\n\n`, '').replace(`I’m ${name}, your companion inside Muze.`, 'I’m Muse, your companion inside Muze.').trim().replace(/\n{3,}/g, '\n\n');
     const ownerCustomized = Object.fromEntries(['soul', 'memory'].map(key => [key, ![MUSE_NOTE_TEMPLATES[key], LEGACY_NOTE_TEMPLATES[key]].some(template => normalize(template) === normalize(context.ownerText[key]))]));
     return {
       ...context, notes, revision, ownerCustomized,
+      observations: (state.observations || []).filter(item => Date.now() - item.updatedAt < OBSERVATION_TTL && !state.entries.some(entry => entry.id === item.id && (entry.deleted || entry.pinned || entry.basis !== 'observed'))).map(item => ({key: item.key, text: item.text, count: item.evidenceHashes.length})),
       summary: !ownerEdited && !expiredChanged && conversation.summaryRevision === revision ? conversation.summary || '' : '',
       messages: conversation.messages,
       contextMessages: contextMessages(conversation.messages, state, thread.split(':')[0]),
@@ -150,6 +153,8 @@ function validateUpdate(update, message) {
   if (!update || !['soul', 'memory'].includes(update.target) || !['owner', 'board'].includes(update.scope) || !['upsert', 'forget'].includes(update.operation)) return false;
   if (typeof update.key !== 'string' || !/^[a-z][a-z0-9_.-]{0,63}$/.test(update.key)) return false;
   if (update.target === 'soul' && (update.scope !== 'owner' || !Object.hasOwn(DEFAULT_MUSE_STYLE, update.key))) return false;
+  if (update.basis !== undefined && !['explicit', 'observed'].includes(update.basis)) return false;
+  if (update.basis === 'observed' && (update.target !== 'soul' || update.scope !== 'owner' || update.operation !== 'upsert')) return false;
   if (typeof update.evidence !== 'string' || update.evidence.trim().length < 4 || !message.includes(update.evidence)) return false;
   if (update.expiresAt !== undefined && update.expiresAt !== null && (update.operation !== 'upsert' || update.target !== 'memory' || update.scope !== 'board' || typeof update.expiresAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(update.expiresAt) || !update.evidence.includes(update.expiresAt) || !Number.isFinite(Date.parse(update.expiresAt + 'T00:00:00Z')) || new Date(update.expiresAt + 'T00:00:00Z').toISOString().slice(0, 10) !== update.expiresAt)) return false;
   return update.operation === 'forget' || safeText(update.text);
@@ -192,6 +197,18 @@ export async function commitMuseTurn(owner, thread, input) {
         const previous = state.entries.find(entry => entry.id === proposedId || entry.aliasIds?.includes(proposedId)) || state.entries.find(entry => sameScope(entry, update, boardId) && hashes.some(hash => factHashes(entry).includes(hash)));
         const id = previous?.id || proposedId;
         if (previous?.pinned || previous?.deletedBy === 'owner') continue;
+        if (update.basis === 'observed') {
+          // A task edit alone is not an enduring preference. Require a pattern,
+          // and never let an inference override an explicitly stated preference.
+          if (previous && previous.basis !== 'observed') continue;
+          const pending = (state.observations || []).find(item => item.id === id && Date.now() - item.updatedAt < OBSERVATION_TTL);
+          const consistent = pending && factForms(pending.text).some(form => hashes.includes(digest(form)));
+          const observation = { id, key: update.key, text: update.text.trim(), updatedAt: Date.now(),
+            evidenceHashes: [...new Set([...(consistent ? pending.evidenceHashes : []), digest(update.evidence.trim().toLowerCase())])].slice(-3),
+            messageIds: [...new Set([...(consistent ? pending.messageIds : []), userMessage.id])].slice(-3) };
+          state.observations = [...(state.observations || []).filter(item => item.id !== id), observation].slice(-6);
+          if (observation.evidenceHashes.length < 3 || observation.messageIds.length < 3) continue;
+        } else state.observations = (state.observations || []).filter(item => item.id !== id);
         if (update.operation === 'forget') {
           if (previous && !previous.deleted) { previous.deleted = true; previous.deletedBy = 'request'; previous.updatedAt = Date.now(); learningChanged = true; forgotten = true; }
           continue;
@@ -208,7 +225,7 @@ export async function commitMuseTurn(owner, thread, input) {
           id, key: previous?.key || update.key, target: update.target, scope: update.scope,
           aliasIds: [...new Set([...(previous?.aliasIds || []), ...(proposedId !== id ? [proposedId] : [])])].slice(-64),
           ...(update.scope === 'board' ? { boardId, boardName: typeof input.boardName === 'string' ? input.boardName.slice(0, 160) : 'Project' } : {}),
-          text: update.text.trim(), evidence: update.evidence, sourceMessageId: userMessage.id,
+          basis: update.basis || 'explicit', text: update.text.trim(), evidence: update.evidence, sourceMessageId: userMessage.id,
           sourceMessageIds: [...new Set([...(previous?.sourceMessageIds || []), previous?.sourceMessageId, userMessage.id].filter(Boolean))].slice(-32),
           evidenceHistory: [...new Set([...(previous?.evidenceHistory || []), previous?.evidence, update.evidence].filter(Boolean))].slice(-16),
           createdAt: previous?.createdAt || Date.now(), updatedAt: Date.now(), pinned: false, deleted: false,
@@ -222,6 +239,7 @@ export async function commitMuseTurn(owner, thread, input) {
         if (retireExpired(draft)) forgotten = true; compactState(draft);
         if (['soul', 'memory'].some(target => Buffer.byteLength(renderNote(notes[target].content, target, draft.entries)) > NOTE_LIMIT)) { capacitySkipped++; continue; }
         if (Buffer.byteLength(JSON.stringify(draft)) > MAX_LEARNING_BYTES) { capacitySkipped++; continue; }
+        draft.observations = (draft.observations || []).filter(item => item.id !== id);
         Object.assign(state, draft);
         learningChanged = true;
       }

@@ -126,7 +126,7 @@ export default function MuzeEditor() {
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
   const updateEditor = useCallback((value: EditorState) => { setEditor(value); setPaint(value.paint); }, []);
   const [dockHeight,setDockHeight]=useState(58);
-  const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(false), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
+  const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(true), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
   const [toast, setToast] = useState(''), [contextPoint, setContextPoint] = useState({ x: 0, y: 0 });
   const [commentPlacement,setCommentPlacement]=useState<{x:number;y:number;nonce:number}|null>(null);
   const [renameDocument,setRenameDocument]=useState<{id:string;title:string}|null>(null);
@@ -147,7 +147,7 @@ export default function MuzeEditor() {
       if (cancelled) return;
       current.current = saved; setWorkspace(saved);
       setDark(localStorage.getItem('muze.theme') === 'dark');
-      setGrid(localStorage.getItem('muze.grid') === 'true');
+      setGrid(localStorage.getItem('muze.grid') !== 'false');
     }).catch(() => { if (!cancelled) setToast('Local storage is unavailable. Enable browser storage and reload.'); });
     return () => { cancelled = true; feedback.dispose(); saveFeedback.current = null; db.current?.close(); db.current = null; };
   }, []);
@@ -167,7 +167,11 @@ export default function MuzeEditor() {
   useEffect(() => { if (active) setName(active.name); }, [active?.id, active?.name]);
   const updateBoard = useCallback((update: (board: Board) => Board) => {
     if (museActive.current) { museCanvas.update(update); return; }
-    if(sharedRef.current.boardId){sharedRef.current.update(update);return;}
+    if(sharedRef.current.boardId){sharedRef.current.update(board => {
+      const next = update(board);
+      if (sharedRef.current.protectedObjects.some(item => Date.parse(item.expiresAt) > Date.now() && !next.pages.some(page => page.id === item.pageId))) { setToast('Muse is using notes on this page. You can delete it when the reply is finished.'); return board; }
+      return next;
+    });return;}
     const value = current.current; if (!value) return;
     commit({ ...value, boards: value.boards.map(board => board.id === value.activeBoard ? update(board) : board) });
   }, [commit, museCanvas.update]);
@@ -183,6 +187,7 @@ export default function MuzeEditor() {
   useEffect(() => { setPopup(null); setStylesOpen(false); }, [museOpen]);
   useEffect(() => { setMuseOpen(false); }, [user?.id]);
   useEffect(() => { engine.current?.setDark(dark); }, [dark]);
+  useEffect(() => { engine.current?.setProtectedObjects(museOpen ? [] : shared.protectedObjects.filter(item => item.pageId === page?.id)); }, [shared.protectedObjects, museOpen, page?.id, editor.ready]);
   useEffect(() => { if (engine.current) engine.current.grid = grid; }, [grid]);
   useEffect(()=>{if(museOpen&&editor.ready&&appearanceRequest){if(engine.current?.focusAppearance())setAppearanceRequest(0);}},[museOpen,editor.ready,appearanceRequest]);
   useEffect(()=>{
@@ -229,13 +234,34 @@ export default function MuzeEditor() {
     const currentBoard = () => museActive.current ? privateBoardRef.current : sharedRef.current.board || current.current?.boards.find(board => board.id === current.current?.activeBoard);
     const isCurrent = () => !signal.aborted && engine.current === target && currentOwner.current === owner && museActive.current === privateNotebook && currentBoard()?.id === boardId && currentBoard()?.activePage === pageId;
     if (!target || !owner || !boardId || !pageId || !isCurrent()) throw new Error('Open your board before messaging Muse.');
-    const selectedIds = target.getSelectedIds();
+    let selectedIds = target.getSelectedIds();
     target.commitTextEditing();
     await museCanvas.flush();
     if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
     await sharedRef.current.flush();
     if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
-    const board = currentBoard()!, drawing = target.serialize();
+    let board = currentBoard()!;
+    if (!privateNotebook && sharedRef.current.boardId) {
+      await sharedRef.current.refresh();
+      if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+      while (!target.canReceiveSharedChanges(true)) {
+        if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+      board = sharedRef.current.getSnapshot()?.board || currentBoard()!;
+      const freshPage = board.pages.find(item => item.id === pageId);
+      if (!freshPage) throw new Error('This page was removed. Open another page before messaging Muse.');
+      const availableIds = new Set<string>();
+      const collectIds = (objects: Record<string, unknown>[]) => { for (const object of objects) { if (typeof object.id === 'string') availableIds.add(object.id); if (Array.isArray(object.objects)) collectIds(object.objects); } };
+      collectIds(freshPage.objects);
+      const remaining = selectedIds.filter(id => availableIds.has(id));
+      if (selectedIds.length && !remaining.length) throw new Error('Those selected notes were removed. Select notes again.');
+      selectedIds = remaining;
+      await target.applySharedDrawing(freshPage, true);
+      if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
+    }
+    const drawing = target.serialize();
     const snapshot = { ...board, pages: board.pages.map(item => item.id === pageId ? { ...item, ...drawing } : item) };
     const prepared = prepareMuseProject({ board: snapshot, message, selectedIds, activeDrawing: drawing, sceneItems: target.getSceneItems() });
     const project = JSON.parse(prepared.projectContext) as MuseProjectContext;
@@ -262,7 +288,7 @@ export default function MuzeEditor() {
     }
     const images = await prepareMuseVisuals(snapshot, refs, signal, scene);
     if (!isCurrent()) throw new DOMException('The board changed.', 'AbortError');
-    return { board: prepared.boardContext, project: JSON.stringify(project), images, anchorIds: prepared.anchorIds };
+    return { board: prepared.boardContext, project: JSON.stringify(project), images, anchorIds: prepared.anchorIds, ...(!privateNotebook && sharedRef.current.boardId ? { sharedBoardId: boardId, complete: () => sharedRef.current.flush() } : {}) };
   }
   async function attachImage(file: File, signal: AbortSignal) {
     const target = engine.current, owner = currentOwner.current, privateNotebook = museActive.current;

@@ -13,15 +13,15 @@ export function boardFailure(error: unknown) {
   console.error('Shared board request failed', { type: error instanceof Error ? error.name : 'UnknownError' });
   return boardJson({ error: 'Could not open this board. Try again.' }, 500);
 }
-function databaseFailure(error: { code?: string; message?: string }) {
-  const status = ['PT409', '40001'].includes(error.code || '') ? 409 : error.code === '42501' ? 403
+export function databaseFailure(error: { code?: string; message?: string }) {
+  const status = error.code === 'PT423' ? 423 : ['PT409', '40001'].includes(error.code || '') ? 409 : error.code === '42501' ? 403
     : ['PGRST301', 'PGRST303'].includes(error.code || '') ? 401
     : error.code === '22023' || error.code === '23514' ? 400 : error.code === '54000' ? 429 : 503;
   const message = status === 401 ? 'Sign in to open this board.' : status === 503 ? 'Board storage is unavailable. Try again.'
     : error.message || 'This board is unavailable.';
   throw new PrivateError(status, message);
 }
-async function context(request: NextRequest, mutation = false) {
+export async function boardContext(request: NextRequest, mutation = false) {
   checkOrigin(request, mutation);
   const { userId, getToken } = await auth();
   if (!userId) throw new PrivateError(401, 'Sign in to share a board.');
@@ -40,43 +40,48 @@ async function write(client: Client, args: Record<string, unknown>) {
 }
 
 export async function listBoards(request: NextRequest) {
-  const { client, userId } = await context(request);
+  const { client, userId } = await boardContext(request);
   const { data, error } = await client.from('shared_boards').select('id,name,owner_id,updated_at').order('updated_at', { ascending: false }).limit(200);
   if (error) databaseFailure(error);
   return boardJson({ boards: (data || []).map(row => ({ id: row.id, name: row.name, role: row.owner_id === userId ? 'owner' : 'editor', updatedAt: row.updated_at })) });
 }
 export async function publishBoard(request: NextRequest) {
-  const { client } = await context(request, true);
+  const { client } = await boardContext(request, true);
   const body = await jsonBody(request, BOARD_BODY_LIMIT);
   const board = sharedBoard(body.board);
   return boardJson(snapshot(await write(client, { operation: 'create', board_scene: board })), 201);
 }
 export async function readBoard(request: NextRequest, id: string) {
-  const { client, userId } = await context(request);
+  const { client, userId } = await boardContext(request);
   const { data, error } = await client.from('shared_boards').select('scene,revision,owner_id').eq('id', boardId(id)).maybeSingle();
   if (error) databaseFailure(error);
   if (!data) throw new PrivateError(404, 'This board is unavailable or you do not have access.');
-  return boardJson(snapshot({ board: data.scene, revision: data.revision, role: data.owner_id === userId ? 'owner' : 'editor' }));
+  const {data: protectedObjects, error: leaseError} = await client.rpc('shared_board_lease', {operation: 'list', board_id: id});
+  if (leaseError) databaseFailure(leaseError);
+  return boardJson({...snapshot({ board: data.scene, revision: data.revision, role: data.owner_id === userId ? 'owner' : 'editor' }), protectedObjects});
 }
 export async function saveBoard(request: NextRequest, id: string) {
-  const { client } = await context(request, true);
+  const { client } = await boardContext(request, true);
   const body = await jsonBody(request, BOARD_BODY_LIMIT);
   const key = boardId(id), board = sharedBoard(body.board, key);
-  return boardJson(snapshot(await write(client, { operation: 'save', board_id: key, board_scene: board, expected_revision: boardRevision(body.revision) })));
+  const saved=snapshot(await write(client, { operation: 'save', board_id: key, board_scene: board, expected_revision: boardRevision(body.revision) }));
+  const {data:protectedObjects,error}=await client.rpc('shared_board_lease',{operation:'list',board_id:key});
+  if(error)databaseFailure(error);
+  return boardJson({...saved,protectedObjects});
 }
 export async function createInvite(request: NextRequest, id: string) {
-  const { client } = await context(request, true);
+  const { client } = await boardContext(request, true);
   const token = randomBytes(32).toString('base64url');
   await write(client, { operation: 'invite', board_id: boardId(id), invite_token: token });
   return boardJson({ token });
 }
 export async function revokeInvite(request: NextRequest, id: string) {
-  const { client } = await context(request, true);
+  const { client } = await boardContext(request, true);
   await write(client, { operation: 'revoke', board_id: boardId(id) });
   return boardJson({ revoked: true });
 }
 export async function joinBoard(request: NextRequest) {
-  const { client } = await context(request, true);
+  const { client } = await boardContext(request, true);
   const body = await jsonBody(request, 1024);
   return boardJson(snapshot(await write(client, { operation: 'join', board_id: boardId(body.boardId), invite_token: inviteToken(body.token) })));
 }
