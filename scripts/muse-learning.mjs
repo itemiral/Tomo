@@ -133,7 +133,11 @@ export async function readMuseLearning(owner, thread) {
     const conversation = await readMuseConversation(owner, thread);
     const revision = personalRevision(state, notes, thread.split(':')[0]);
     const context = view(state, notes, thread.split(':')[0]);
-    const normalize = content => content.replace(`My name is ${name}.\n\n`, '').replace(`I’m ${name}, your companion inside Muze.`, 'I’m Muse, your companion inside Muze.').trim().replace(/\n{3,}/g, '\n\n');
+    const normalize = content => {
+      let text = content.replace(`My name is ${name}.\n\n`, '');
+      for (const app of ['Muze', 'Tomo']) for (const alias of new Set([name, 'Muse'])) text = text.replace(`I’m ${alias}, your companion inside ${app}.`, 'I’m Muse, your companion inside Tomo.');
+      return text.trim().replace(/\n{3,}/g, '\n\n');
+    };
     const ownerCustomized = Object.fromEntries(['soul', 'memory'].map(key => [key, ![MUSE_NOTE_TEMPLATES[key], LEGACY_NOTE_TEMPLATES[key]].some(template => normalize(template) === normalize(context.ownerText[key]))]));
     return {
       ...context, notes, revision, ownerCustomized,

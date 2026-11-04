@@ -42,7 +42,7 @@ test('Muse WebP generation becomes a real saved canvas image with one undoable b
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   expect((await exported(page)).objects).toHaveLength(2);
   await page.reload();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   expect((await exported(page)).objects.find(object => object.id === 'generated-banana')).toMatchObject({ type: 'Image', src });
 });
 

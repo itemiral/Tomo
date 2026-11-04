@@ -14,7 +14,7 @@ async function call(method, params = {}, options = {}) {const response = await s
 
 test('legacy initialization, tool discovery, ping and repeated requests work without a session', async () => {
   const initialized = await call('initialize', {protocolVersion: '2025-11-25', capabilities: {}, clientInfo: {name: 'test-client', version: '1'}});
-  assert.equal(initialized.response.status, 200); assert.equal(initialized.body.result.serverInfo.name, 'muze-board');
+  assert.equal(initialized.response.status, 200); assert.equal(initialized.body.result.serverInfo.name, 'tomo-board');
   assert.equal(initialized.response.headers.has('mcp-session-id'), false);
   const notification = await serveBoardTool(request({jsonrpc: '2.0', method: 'notifications/initialized'}), id, reader);
   assert.equal(notification.status, 202);

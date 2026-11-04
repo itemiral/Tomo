@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 type Shape = { fontFamily?: string; fontSize?: number; fontWeight?: string; autoWidth?: boolean; labelFor?: string; boxHeight?: number; textAlign?: string; frameId?: string; bend?: number; arrowEnd?: string; muzeDash?: string; muzeFill?: string; muzeKind?: string; id: string; type: string; left: number; top: number; width: number; height: number; scaleX: number; scaleY: number; text?: string; stroke?: string; fill?: string; src?: string; startBinding?: string; endBinding?: string; objects?: Shape[] };
 type BoardFile = { format: string; board: { name: string; activePage: string; pages: { id: string; name: string; objects: Shape[]; viewport: number[] }[] } };
 const shapes = (file: BoardFile) => file.board.pages.find(p => p.id === file.board.activePage)!.objects;
-async function ready(page: Page) { await page.goto('/'); await expect(page.getByRole('button', { name: 'Draw', exact: true })).toBeVisible(); await expect(page.locator('canvas.upper-canvas')).toBeVisible(); await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true'); if((page.viewportSize()?.width||1440)>700)await page.getByRole('button',{name:'Styles',exact:true}).click(); }
+async function ready(page: Page) { await page.goto('/'); await expect(page.getByRole('button', { name: 'Draw', exact: true })).toBeVisible(); await expect(page.locator('canvas.upper-canvas')).toBeVisible(); await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true'); if((page.viewportSize()?.width||1440)>700)await page.getByRole('button',{name:'Styles',exact:true}).click(); }
 async function chooseStyle(page: Page, name: string) {
   const control = page.getByRole('button', { name, exact: true });
   if (!await control.isVisible()) await page.getByRole('button', { name: 'Styles', exact: true }).click();
@@ -18,7 +18,7 @@ async function stroke(page: Page, tool: string, from = { x: 300, y: 240 }, to = 
 async function save(page: Page) {
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const pending = page.waitForEvent('download');
-  await page.getByRole('menuitem', { name: 'Save editable copy (.muze)', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Save editable copy (.tomo)', exact: true }).click();
   const file = await pending, bytes = await readFile((await file.path())!);
   return { filename: file.suggestedFilename(), bytes, board: JSON.parse(bytes.toString()) as BoardFile };
 }
@@ -26,7 +26,7 @@ async function newBoard(page: Page) { await page.getByRole('button', { name: 'Ma
 
 test('draws shapes, connected arrows, handwriting, editable text and notes on our own canvas', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  await ready(page); await expect(page).toHaveTitle('Muze — your whiteboard');
+  await ready(page); await expect(page).toHaveTitle('Tomo — your whiteboard');
   await expect(page.getByText(/license for production/i)).toHaveCount(0);
   expect((await request.get('/api/muse/chat?thread=board:page')).status()).toBe(401);
   await stroke(page, 'Rectangle', { x: 250, y: 220 }, { x: 440, y: 350 });
@@ -65,21 +65,21 @@ test('keeps boards and pages separate and saves drawings immediately for reload'
   await ready(page); await page.getByRole('textbox', { name: 'Board name' }).fill('Design ideas'); await page.getByRole('textbox', { name: 'Board name' }).press('Enter');
   await stroke(page, 'Rectangle');
   await page.getByRole('button', { name: 'Pages', exact: true }).click(); await page.getByRole('menuitem', { name: 'New page', exact: true }).click();
-  await stroke(page, 'Draw'); const first = await save(page); expect(first.filename).toBe('Design ideas.muze'); expect(first.board.board.pages).toHaveLength(2);
+  await stroke(page, 'Draw'); const first = await save(page); expect(first.filename).toBe('Design ideas.tomo'); expect(first.board.board.pages).toHaveLength(2);
   await newBoard(page); await page.getByRole('textbox', { name: 'Board name' }).fill('Second board'); await page.getByRole('textbox', { name: 'Board name' }).press('Enter'); await stroke(page, 'Rectangle');
   await page.reload(); await expect(page.getByRole('textbox', { name: 'Board name' })).toHaveValue('Second board'); expect(shapes((await save(page)).board)).toHaveLength(1);
   await page.getByRole('button', { name: 'Main menu', exact: true }).click(); await page.getByRole('menuitem', { name: 'Design ideas', exact: true }).click();
   const restored = (await save(page)).board; expect(restored.board.pages).toHaveLength(2); expect(shapes(restored).map(o => o.id)).toEqual(shapes(first.board).map(o => o.id));
 });
 
-test('saves and opens images in a portable board file without replacing existing work', async ({ page }) => {
+for (const extension of ['tomo', 'muze']) test(`saves and opens images in a portable .${extension} board file without replacing existing work`, async ({ page }) => {
   await ready(page); await stroke(page, 'Rectangle');
   await page.getByLabel('Choose an image').setInputFiles({ name: 'circle.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="45" fill="#4564ef"/></svg>') });
   await expect(page.getByRole('button', { name: 'Duplicate selected' })).toBeEnabled();
   await expect.poll(async () => shapes((await save(page)).board).length).toBe(2);
   const original = await save(page); expect(shapes(original.board).find(o => o.type === 'Image')?.src).toMatch(/^data:image\/png/);
   await newBoard(page); await page.getByRole('textbox', { name: 'Board name' }).fill('Keep this board'); await page.getByRole('textbox', { name: 'Board name' }).press('Enter');
-  await page.getByLabel('Open a board file').setInputFiles({ name: 'import.muze', mimeType: 'application/json', buffer: original.bytes });
+  await page.getByLabel('Open a board file').setInputFiles({ name: 'import.' + extension, mimeType: 'application/json', buffer: original.bytes });
   await expect(page.getByRole('textbox', { name: 'Board name' })).toHaveValue(original.board.board.name);
   await page.reload(); await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
   const imported = (await save(page)).board; expect(shapes(imported).map(o => o.id)).toEqual(shapes(original.board).map(o => o.id));
@@ -89,7 +89,7 @@ test('saves and opens images in a portable board file without replacing existing
 test('rejects damaged files without altering the current board', async ({ page }) => {
   await ready(page); await stroke(page, 'Rectangle'); const before = await save(page);
   await page.getByLabel('Open a board file').setInputFiles({ name: 'broken.muze', mimeType: 'application/json', buffer: Buffer.from('{"not":"a board"}') });
-  await expect(page.locator('.muze-toast')).toContainText('Choose a valid Muze file.'); expect(shapes((await save(page)).board).map(o => o.id)).toEqual(shapes(before.board).map(o => o.id));
+  await expect(page.locator('.muze-toast')).toContainText('Choose a valid Tomo file.'); expect(shapes((await save(page)).board).map(o => o.id)).toEqual(shapes(before.board).map(o => o.id));
 });
 
 test('pans, zooms, draws a minimap, and exports real PNG and SVG files', async ({ page }) => {
@@ -141,7 +141,7 @@ test('saves text while it is being edited and retains readable drawing data acro
   expect(shapes(JSON.parse(await readFile((await file.path())!, 'utf8')))[0].text).toBe('Save this thought');
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Main menu', exact: true }).click(); await page.getByRole('menuitem', { name: 'Dark canvas', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveClass(/muze-dark/);
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveClass(/muze-dark/);
   expect(shapes((await save(page)).board)[0].fill).toBe('#1d1d1d');
   await page.screenshot({ path: 'verification/muze-native-dark.png' });
 });
@@ -191,7 +191,7 @@ test('edits shape labels, moves and duplicates them with their shapes, and resto
   objects = shapes((await save(page)).board); expect(objects).toHaveLength(4);
   for (const item of objects.filter(o => o.labelFor)) expect(objects.map(o => o.id)).toContain(item.labelFor);
   expect(new Set(objects.map(o => o.id)).size).toBe(4);
-  await page.reload(); await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await page.reload(); await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   expect(shapes((await save(page)).board).filter(o => o.text === 'One shared plan')).toHaveLength(2);
 });
 
@@ -225,7 +225,7 @@ test('reshapes arrows with their handles and preserves curved connectors and arr
   await page.getByLabel('Arrow end', { exact: true }).selectOption('triangle');
   await page.mouse.move(700, 300); await page.mouse.down(); await page.mouse.move(820, 230, { steps: 15 }); await page.mouse.up();
   arrow = shapes((await save(page)).board)[0]; expect(arrow.arrowEnd).toBe('triangle'); expect(arrow.width).toBeGreaterThan(500);
-  await page.reload(); await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await page.reload(); await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   arrow = shapes((await save(page)).board)[0]; expect(arrow.arrowEnd).toBe('triangle'); expect(Math.abs(arrow.bend || 0)).toBeGreaterThan(100);
 });
 
@@ -247,7 +247,7 @@ test('copies labeled drawings between pages and pastes external text after copyi
   await ready(page); await stroke(page, 'Rectangle'); await page.keyboard.press('Enter'); await page.keyboard.insertText('Reusable idea'); await page.keyboard.press('Escape');
   await page.keyboard.press('ControlOrMeta+c');
   await page.getByRole('button', { name: 'Pages', exact: true }).click(); await page.getByRole('menuitem', { name: 'New page', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true');
   await page.keyboard.press('ControlOrMeta+v');
   await expect.poll(async () => shapes((await save(page)).board).length).toBe(2);
   let objects = shapes((await save(page)).board); expect(objects.find(o => o.labelFor)?.text).toBe('Reusable idea');
@@ -265,7 +265,7 @@ test('formats rich text, embeds fonts in SVG, and exports visible pixels in PNG'
   const pixels = await page.evaluate(async source => { const image = new Image(); image.src = source; await image.decode(); const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0); const data = context.getImageData(0, 0, image.width, image.height).data; let visible = 0; for (let i = 3; i < data.length; i += 4) if (data[i] > 100) visible++; return visible; }, 'data:image/png;base64,' + png.toString('base64'));
   expect(pixels).toBeGreaterThan(500);
   const original = await save(page); await newBoard(page); await page.getByLabel('Open a board file').setInputFiles({ name: 'formatted.muze', mimeType: 'application/json', buffer: original.bytes });
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true'); await expect(page.locator('.muze-vector-surface text')).toContainText('An important thought');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-ready', 'true'); await expect(page.locator('.muze-vector-surface text')).toContainText('An important thought');
 });
 
 test('supports two-finger panning and pinch zoom without creating accidental shapes', async ({ page, context }) => {

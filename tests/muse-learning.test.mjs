@@ -162,6 +162,7 @@ test('only owner customization overrides learned defaults, including older renam
   const owner = 'learning-customization';
   let snapshot = await readMuseLearning(owner, 'board:page');
   assert.deepEqual(snapshot.ownerCustomized, { soul: false, memory: false });
+  assert.match(snapshot.notes.soul.content, /your companion inside Tomo\./);
   await saveMuseNote(owner, 'soul', LEGACY_NOTE_TEMPLATES.soul, snapshot.notes.soul.revision);
   const { readMuseCanvas, saveMuseCanvas } = await import('../scripts/muse-canvas.mjs');
   const canvas = await readMuseCanvas(owner);
@@ -169,6 +170,14 @@ test('only owner customization overrides learned defaults, including older renam
   await saveMuseCanvas(owner, canvas);
   snapshot = await readMuseLearning(owner, 'board:page');
   assert.equal(snapshot.ownerCustomized.soul, false);
+  for (const app of ['Muze', 'Tomo']) {
+    const {MUSE_NOTE_TEMPLATES} = await import('../scripts/muse-defaults.mjs');
+    const template = MUSE_NOTE_TEMPLATES.soul.replace('inside Tomo.', 'inside ' + app + '.').replace('I’m Muse,', 'I’m Miso,');
+    await saveMuseNote(owner, 'soul', template, snapshot.notes.soul.revision);
+    snapshot = await readMuseLearning(owner, 'board:page');
+    assert.equal(snapshot.ownerCustomized.soul, false, app + ' defaults must remain adaptable after a Muse rename');
+    assert.match(snapshot.notes.soul.content, /I’m Miso, your companion inside Tomo\./);
+  }
   await turn(owner, 'I prefer detailed answers.', [update('soul', 'detail', 'Prefer detailed answers.', 'I prefer detailed answers')]);
   snapshot = await readMuseLearning(owner, 'board:page');
   assert.equal(snapshot.ownerCustomized.soul, false);

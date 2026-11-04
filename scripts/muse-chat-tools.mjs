@@ -70,7 +70,7 @@ export async function findCommonsImage(message,signal,fetcher=fetch,importer=imp
  const query=(normalized?message:message.replace(/\b(?:can|could|you|please|add|insert|find|fetch|get|show|search|put|place|bring|me|an?|some|the|images?|photos?|pictures?|of|for|on|onto|to|my|this|board|whiteboard|web|and)\b/gi,' ').replace(/\s+/g,' ').trim()).slice(0,240);
  if(!query)throw new MuseStoreError(400,'Tell me what you want a picture of.');
  const params=new URLSearchParams({action:'query',format:'json',generator:'search',gsrsearch:query+' filetype:bitmap',gsrnamespace:'6',gsrlimit:'5',prop:'imageinfo',iiprop:'url|mime|extmetadata',iiurlwidth:'800'});
- const response=await fetcher('https://commons.wikimedia.org/w/api.php?'+params,{redirect:'error',headers:{'User-Agent':'Muze/1.0 (https://muze-board.vercel.app)','Accept':'application/json'},signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});
+ const response=await fetcher('https://commons.wikimedia.org/w/api.php?'+params,{redirect:'error',headers:{'User-Agent':'Tomo/1.0 (https://muze-board.vercel.app)','Accept':'application/json'},signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});
  if(!response.ok)throw new MuseStoreError(502,'Image search is unavailable. Try a direct public image link.');
  const data=await readToolJson(response);
  for(const page of Object.values(data.query?.pages||{}).sort((a,b)=>(a.index||0)-(b.index||0))){
@@ -88,7 +88,7 @@ export async function findBoardImage(query,signal,fetcher=fetch,importer=importI
  const deadline=AbortSignal.any([signal,AbortSignal.timeout(25_000)]);
  try{return await findCommonsImage(query,AbortSignal.any([deadline,AbortSignal.timeout(12_000)]),fetcher,importer,true);}catch(error){if(deadline.aborted)throw error;}
  const params=new URLSearchParams({action:'query',format:'json',generator:'search',gsrsearch:query.slice(0,240),gsrlimit:'4',prop:'pageimages|info',piprop:'thumbnail',pithumbsize:'800',inprop:'url'});
- const response=await fetcher('https://en.wikipedia.org/w/api.php?'+params,{redirect:'error',headers:{'User-Agent':'Muze/1.0 (https://muze-board.vercel.app)','Accept':'application/json'},signal:deadline});
+ const response=await fetcher('https://en.wikipedia.org/w/api.php?'+params,{redirect:'error',headers:{'User-Agent':'Tomo/1.0 (https://muze-board.vercel.app)','Accept':'application/json'},signal:deadline});
  if(response.ok){
   const data=await readToolJson(response);
   for(const page of Object.values(data.query?.pages||{}).sort((a,b)=>(a.index||0)-(b.index||0))){

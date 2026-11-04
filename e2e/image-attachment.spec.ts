@@ -53,7 +53,7 @@ test('attachments reject unsupported files and preserve transparent pixels in th
   const fixture = await museFixture(page);
   await page.getByRole('button', { name: 'Open Muse', exact: true }).click();
   await page.getByRole('dialog', { name: 'Muse', exact: true }).getByRole('button', { name: 'Edit Muse', exact: true }).click();
-  await expect(page.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-muse-board', 'true');
+  await expect(page.getByRole('main', { name: 'Tomo' })).toHaveAttribute('data-muse-board', 'true');
   await openAttachments(page);
   await imageInput(page).setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Not an image') });
   await expect(page.getByRole('alert')).toContainText('Choose a PNG, JPEG, WebP, or GIF under 10 MB.');

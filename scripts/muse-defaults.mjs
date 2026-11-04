@@ -19,8 +19,9 @@ export const LEGACY_NOTE_TEMPLATES = {
 
 // Neutral starting notes adapt through learned entries and owner edits.
 export const MEMORY_INTRODUCTION = 'Your Muse learns what matters to you as you work together. Useful preferences, decisions, and ongoing projects will collect here to make its help more personal. You can edit or remove anything.';
+const previousSoul = PREVIOUS_NOTE_TEMPLATES.soul.split('\n\n## Make me yours')[0] + '\n';
 export const MUSE_NOTE_TEMPLATES = {
-  soul: PREVIOUS_NOTE_TEMPLATES.soul.split('\n\n## Make me yours')[0] + '\n',
+  soul: previousSoul.replace('your companion inside Muze.', 'your companion inside Tomo.'),
   memory: '# Memory\n\n' + MEMORY_INTRODUCTION + '\n',
 };
 
@@ -36,7 +37,8 @@ export function restoreMuseNoteDefaults(content, target, name = 'Muse') {
 
 export function cleanMuseNoteDefaults(content, target, name = 'Muse') {
   let result = content;
-  for (const template of [PREVIOUS_NOTE_TEMPLATES, LEGACY_NOTE_TEMPLATES].flatMap(templates => [...new Set([name, 'Muse'])].map(alias => templates[target].replace('I’m Muse,', () => `I’m ${alias},`).trimEnd()))) {
+  const earlier = [PREVIOUS_NOTE_TEMPLATES, LEGACY_NOTE_TEMPLATES, { ...MUSE_NOTE_TEMPLATES, soul: previousSoul }];
+  for (const template of earlier.flatMap(templates => [...new Set([name, 'Muse'])].map(alias => templates[target].replace('I’m Muse,', () => `I’m ${alias},`).trimEnd()))) {
     if (result.trimEnd() === template || result.startsWith(template + '\n')) {
       result = MUSE_NOTE_TEMPLATES[target].replace('I’m Muse,', () => `I’m ${name},`).trimEnd() + result.slice(template.length);
       break;

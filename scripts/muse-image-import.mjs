@@ -31,7 +31,7 @@ async function download(target,signal,lookupHost,get){
  if(!addresses.length||addresses.some(a=>a.family!==4||!publicAddress(a.address)))throw new MuseStoreError(400,'Private or reserved image addresses are not allowed.');
  const address=addresses[0].address;
  return new Promise((resolve,reject)=>{
-  const request=get(target,{signal,lookup:(_host,options,callback)=>options.all?callback(null,[{address,family:4}]):callback(null,address,4),headers:{Accept:'image/png,image/jpeg,image/webp','User-Agent':'Muze/1.0 (https://muze-board.vercel.app)'}},response=>{
+  const request=get(target,{signal,lookup:(_host,options,callback)=>options.all?callback(null,[{address,family:4}]):callback(null,address,4),headers:{Accept:'image/png,image/jpeg,image/webp','User-Agent':'Tomo/1.0 (https://muze-board.vercel.app)'}},response=>{
    if([301,302,303,307,308].includes(response.statusCode)){response.destroy();resolve({redirect:response.headers.location});return;}
    if(response.statusCode!==200){response.destroy();reject(new MuseStoreError(502,'The image host could not provide that image.'));return;}
    if(!/^image\/(png|jpeg|webp)(;|$)/i.test(response.headers['content-type']||'')){response.destroy();reject(new MuseStoreError(400,'Choose a PNG, JPEG, or WebP image.'));return;}
