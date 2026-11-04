@@ -6,6 +6,8 @@ import { MuseMarkdown, museRequest, RequestError, type MuseProfile } from './sha
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import { museProgressLabel, type MusePreparedContext, type MuseProgress } from '@/lib/muse-request';
 import { sendMuseChat } from './chat-request';
+import {museRequestLease} from './request-lease';
+import {MUSE_SCENE_CHANGED} from '@/lib/shared-board-leases';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
 type Props = { attachImage: (file: File, signal: AbortSignal) => Promise<void>; expand: () => void; beforeSend?: () => Promise<void>; prepareContext?:(message?:string,signal?:AbortSignal)=>Promise<string|MusePreparedContext>; selectedIds?:string[]; profile: MuseProfile; thread: string; boardContext: string; hidden: boolean; close: () => void; locked: () => void; onThinking: (busy: boolean, selectedIds?:string[],phase?:MuseProgress) => void; applyActions: (actions: MuseActions) => MuseApplyResult };
@@ -35,23 +37,37 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
     if (controller.current || busy || imageBusy || !message || !ready) return;
     setBusy(true); setError(''); setText(''); setPending(message); setSuggestions([]); setPhase('context'); onThinking(true,selectedIds,'context');
     const abort = new AbortController(); controller.current = abort;
+    let lease: ReturnType<typeof museRequestLease> | undefined;
     try {
-      let prepared: string | MusePreparedContext = boardContext;
-      if(prepareContext)prepared=await prepareContext(message,abort.signal);else await beforeSend?.();
-      if(!mounted.current||abort.signal.aborted)return;
-      const packet = typeof prepared === 'string' ? {board:prepared} : prepared;
-      const context = packet.board;
-      const focus=JSON.parse(context).selectedIds;
-      const requestFocus=Array.isArray(focus)?focus.filter((id:unknown):id is string=>typeof id==='string'):[];
-      const workingIds = requestFocus.length ? requestFocus : packet.anchorIds || [];
-      onThinking(true,workingIds,'context');expand();
-      const result = await sendMuseChat<{ messages: Message[]; actions: MuseActions; suggestions?:string[]; personalizationUpdated?:boolean }>({ thread, board: context, project:packet.project, images:packet.images, message }, abort.signal, phase=>{if(mounted.current&&!abort.signal.aborted){setPhase(phase);onThinking(true,workingIds,phase);}});
+      let packet: MusePreparedContext = {board: boardContext}, requestFocus: string[] = [];
+      let result!: {messages: Message[]; actions: MuseActions; suggestions?: string[]; personalizationUpdated?: boolean};
+      for(let attempt=0;attempt<2;attempt++) {
+        let prepared: string | MusePreparedContext = boardContext;
+        if(prepareContext)prepared=await prepareContext(message,abort.signal);else await beforeSend?.();
+        if(!mounted.current||abort.signal.aborted)return;
+        packet = typeof prepared === 'string' ? {board:prepared} : prepared;
+        const focus=JSON.parse(packet.board).selectedIds;
+        requestFocus=Array.isArray(focus)?focus.filter((id:unknown):id is string=>typeof id==='string'):[];
+        const workingIds = requestFocus.length ? requestFocus : packet.anchorIds || [];
+        onThinking(true,workingIds,'context');expand();
+        const requestId=packet.sharedBoardId?crypto.randomUUID():undefined;
+        lease=packet.sharedBoardId&&requestId?museRequestLease(packet.sharedBoardId,requestId,abort.signal):undefined;
+        try {
+          result = await sendMuseChat({thread,board:packet.board,project:packet.project,images:packet.images,message,sharedBoardId:packet.sharedBoardId,requestId},abort.signal,phase=>{if(mounted.current&&!abort.signal.aborted){setPhase(phase);onThinking(true,workingIds,phase);}});
+          break;
+        } catch(cause) {
+          await lease?.release();lease=undefined;
+          if(attempt===0&&packet.sharedBoardId&&cause instanceof RequestError&&cause.status===409&&cause.message===MUSE_SCENE_CHANGED)continue;
+          throw cause;
+        }
+      }
       if (mounted.current && !abort.signal.aborted) {
         setMessages(result.messages); onThinking(false);
         if (result.actions.cards.length || result.actions.updates.length || result.actions.images?.length) {
           const applied = applyActions({...result.actions,focusIds:requestFocus,anchorIds:packet.anchorIds,layout:/\b(align(?:ed)?|grid|table|timeline|kanban|rows?|columns?)\b/i.test(message)?'aligned':'organic'}), id = result.messages.at(-1)!.id;
           setApplied(values => ({ ...values, [id]: applied }));
         }
+        await packet.complete?.();
         if(currentSelection.current===JSON.stringify([...requestFocus].sort()))setSuggestions(Array.isArray(result.suggestions)?[...new Set(result.suggestions.filter(value=>typeof value==='string'&&value.trim()&&value.length<=100).map(value=>value.trim()))].slice(0,2):[]);
         if(result.personalizationUpdated)window.dispatchEvent(new CustomEvent('muse-personalization-updated',{detail:{ownerId:profile.ownerId}}));
       }
@@ -59,7 +75,7 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
       if (abort.signal.aborted || !mounted.current) return;
       onThinking(false); setText(message);
       if (cause instanceof RequestError && cause.status === 401) locked(); else setError((cause as Error).message);
-    } finally { if (mounted.current && controller.current === abort) { controller.current=null;setBusy(false); setPending(''); } }
+    } finally { await lease?.release(); if (mounted.current && controller.current === abort) { controller.current=null;setBusy(false); setPending(''); } }
   }
   async function image(file: File) {
     if (imageController.current) return;

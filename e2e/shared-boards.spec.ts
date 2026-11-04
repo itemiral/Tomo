@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-import { museFixture, exported } from './muse-fixture';
+import { museFixture, exported, chat, send } from './muse-fixture';
 import type { Board } from '../src/components/muze/storage';
+import {removesProtectedObjects, type ProtectedBoardObject} from '../src/lib/shared-board-leases';
 
 const boardId = '1d6e0a20-9095-4bd3-a826-f53c6d9cd480';
 type Role = 'owner' | 'editor';
@@ -11,8 +12,12 @@ function sharedApi() {
   let board: Board | null = null, revision = 0, tokenVersion = 0, token: string | null = null;
   const members = new Map<string, Role>();
   const published: Board[] = [], saves: Board[] = [], joins: string[] = [];
+  const leases=new Map<string,{user:string;objects:ProtectedBoardObject[]}>();
+  const protectedObjects=()=>[...leases.values()].flatMap(value=>value.objects);
   return {
     published, saves, joins,
+    activeLeases:()=>leases.size,
+    acquire(user:string,requestId:string,objects:{pageId:string;objectId:string}[]){leases.set(requestId,{user,objects:objects.map(item=>({...item,expiresAt:new Date(Date.now()+90000).toISOString()}))});},
     current: () => board,
     token: () => token,
     remoteChange(change: (board: Board) => Board) { board = change(structuredClone(board!)); revision++; },
@@ -21,8 +26,8 @@ function sharedApi() {
         const request = route.request(), url = new URL(request.url());
         const path = url.pathname.slice('/api/boards'.length), method = request.method();
         const user = actor(), role = members.get(user);
-        const body = method === 'POST' || method === 'PUT' ? request.postDataJSON() : null;
-        const snapshot = () => ({ board, revision: String(revision), role: members.get(user) });
+        const body = method === 'POST' || method === 'PUT' || method === 'DELETE' && path.endsWith('/leases') ? request.postDataJSON() : null;
+        const snapshot = () => ({ board, revision: String(revision), role: members.get(user),protectedObjects:protectedObjects() });
         if (!user) return route.fulfill({ status: 401, json: { error: 'Sign in to join this board.' } });
         if (!path && method === 'GET') return route.fulfill({ json: { boards: role && board ? [{ id: boardId, name: board.name, role, updatedAt: new Date().toISOString() }] : [] } });
         if (!path && method === 'POST') {
@@ -37,6 +42,11 @@ function sharedApi() {
           return route.fulfill({ json: snapshot() });
         }
         if (!role || !board || !path.startsWith('/' + boardId)) return route.fulfill({ status: 404, json: { error: 'This board is not available to your account.' } });
+        if(path.endsWith('/leases')){
+          const held=leases.get(body.requestId);if(held&&held.user!==user)return route.fulfill({status:403,json:{error:'Private request.'}});
+          if(method==='DELETE')leases.delete(body.requestId);
+          return route.fulfill({json:{}});
+        }
         if (path.endsWith('/invite')) {
           if (role !== 'owner') return route.fulfill({ status: 403, json: { error: 'Only the board owner can manage invitations.' } });
           if (method === 'DELETE') { token = null; return route.fulfill({ json: { revoked: true } }); }
@@ -45,6 +55,7 @@ function sharedApi() {
         }
         if (method === 'PUT') {
           if (body.revision !== String(revision)) return route.fulfill({ status: 409, json: { error: 'This board changed elsewhere.' } });
+          if(removesProtectedObjects(board,body.board,protectedObjects()))return route.fulfill({status:423,json:{error:'Muse is using those notes. Try deleting them after the response finishes.'}});
           board = structuredClone(body.board); revision++; saves.push(structuredClone(board!));
         }
         return route.fulfill({ json: snapshot() });
@@ -87,11 +98,12 @@ test('shared board endpoints require a real signed-in session', async ({ request
     expect(response.status()).toBe(401);
     expect(response.headers()['cache-control']).toContain('no-store');
   }
-  for (const path of ['/api/boards', '/api/boards/join', '/api/boards/' + boardId + '/invite']) {
+  for (const path of ['/api/boards', '/api/boards/join', '/api/boards/' + boardId + '/invite', '/api/boards/' + boardId + '/leases']) {
     expect((await request.post(path, { headers: { Origin: origin }, data: {} })).status()).toBe(401);
   }
   expect((await request.put('/api/boards/' + boardId, { headers: { Origin: origin }, data: {} })).status()).toBe(401);
   expect((await request.delete('/api/boards/' + boardId + '/invite', { headers: { Origin: origin } })).status()).toBe(401);
+  expect((await request.delete('/api/boards/' + boardId + '/leases', { headers: { Origin: origin }, data: {} })).status()).toBe(401);
   expect((await request.post('/api/boards/join', { headers: { Origin: 'https://another.invalid' }, data: {} })).status()).toBe(403);
 });
 
@@ -240,4 +252,30 @@ test('an invite stays pending while signed out and joins the account that signs 
     await expect.poll(() => new URL(guest.url()).hash).toBe('');
     expect(api.joins).toEqual(['owner-b']);
   } finally { await context.close(); }
+});
+
+for(const finish of ['complete','cancel'] as const)test('active Muse notes are protected across two members until the request '+finish+'s',async({page,browser})=>{
+ const api=sharedApi();await api.attach(page,()=> 'owner-a');const owner=await museFixture(page);await addNote(page,'Shared task to protect');
+ const share=await openShare(page);await share.getByRole('button',{name:'Create invite link',exact:true}).click();await expect(share.getByRole('button',{name:'Copy invite link',exact:true})).toBeVisible();await page.keyboard.press('Escape');
+ const note=api.current()!.pages[0].objects[0],pageId=api.current()!.activePage;
+ let release!:()=>void;const gate=new Promise<void>(done=>release=done);
+ owner.response(async body=>{const packet=body as typeof body&{requestId:string;sharedBoardId:string};expect(packet.sharedBoardId).toBe(boardId);expect(packet.requestId).toBeTruthy();api.acquire('owner-a',packet.requestId,JSON.parse(packet.board).objects.map((object:{id:string})=>({pageId,objectId:object.id})));await gate;return {cards:[],updates:[{id:String(note.id),text:'Muse refined the task',expectedText:String(note.text)}]};});
+ const context=await browser.newContext({viewport:{width:1440,height:900}});
+ try{
+  const peer=await context.newPage();await api.attach(peer,()=> 'owner-b');const second=await museFixture(peer);await second.owner('owner-b');await openLink(peer,api.token()!);await expect.poll(()=>canvasText(peer)).toContain('Sharedtasktoprotect');
+  await chat(page);await send(page,'Improve this task');await expect.poll(api.activeLeases).toBe(1);
+  await peer.evaluate(()=>dispatchEvent(new Event('online')));await peer.waitForTimeout(350);
+  const select=async()=>{const box=(await peer.locator('.muze-vector-surface [id="'+note.id+'"]').boundingBox())!;await peer.mouse.click(box.x+35,box.y+35);};
+  await select();await peer.keyboard.press('Backspace');await expect.poll(()=>api.current()!.pages[0].objects.some(object=>object.id===note.id)).toBe(true);
+  await expect(peer.getByRole('alert')).toContainText('Muse is using');await peer.getByRole('button',{name:'Dismiss message'}).click();
+  await addNote(peer,'Independent peer contribution',900,500);await expect.poll(()=>JSON.stringify(api.current())).toContain('Independent peer contribution');
+  if(finish==='complete')release();else await page.getByRole('button',{name:'Stop response',exact:true}).click();
+  await expect.poll(api.activeLeases).toBe(0);
+  if(finish==='complete')expect(JSON.stringify(api.current())).toContain('Muse refined the task');
+  await peer.evaluate(()=>dispatchEvent(new Event('online')));
+  if(finish==='complete')await expect.poll(()=>canvasText(peer)).toContain('Muserefinedthetask');else await peer.waitForTimeout(350);
+  await select();await peer.keyboard.press('Backspace');await expect.poll(()=>api.current()!.pages[0].objects.some(object=>object.id===note.id)).toBe(false);
+  expect(JSON.stringify(api.current())).toContain('Independent peer contribution');
+  await expect(peer.getByText('Reload shared version',{exact:true})).toHaveCount(0);
+ }finally{release();await context.close();}
 });

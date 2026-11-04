@@ -22,6 +22,20 @@ let sharedClipboard: FabricObject | null = null;
 
 export class WhiteboardEngine {
   private enabled = true;
+  private protectedObjects = new Map<string, number>();
+  private lastProtectionNotice = 0;
+  setProtectedObjects(objects: {objectId: string; expiresAt: string}[]) {
+    this.protectedObjects = new Map(objects.map(item => [item.objectId, Date.parse(item.expiresAt)]));
+  }
+  private protectedId(id: string | undefined) { return !!id && (this.protectedObjects.get(id) || 0) > Date.now(); }
+  private warnProtected() {
+    if (Date.now() - this.lastProtectionNotice > 1500) { this.report('Muse is using this note. You can delete it when the reply is finished.'); this.lastProtectionNotice = Date.now(); }
+  }
+  private blocksRemoval(objects: FabricObject[]): boolean {
+    const blocked = objects.some(object => this.protectedId(object.id) || object instanceof Group && this.blocksRemoval(object.getObjects()));
+    if (blocked) this.warnProtected();
+    return blocked;
+  }
   readonly canvas: Canvas;
   tool: Tool = 'select';
   paint = { ...INITIAL_PAINT };
@@ -308,6 +322,11 @@ export class WhiteboardEngine {
   }
   async undo(redo = false) {
     if (this.loading || (redo ? !this.future.length : this.history.length < 2)) return;
+    const candidate = JSON.parse((redo ? this.future.at(-1) : this.history.at(-2))!) as {objects?: Record<string, unknown>[]};
+    const ids = new Set<string>();
+    const collect = (objects: Record<string, unknown>[]) => { for (const object of objects) { if (typeof object.id === 'string') ids.add(object.id); if (Array.isArray(object.objects)) collect(object.objects); } };
+    collect(candidate.objects || []);
+    if (this.sceneObjects().some(object => this.protectedId(object.id) && !ids.has(object.id!))) { this.warnProtected(); return; }
     this.loading = true; this.canvas.discardActiveObject();
     if (redo) this.history.push(this.future.pop()!); else this.future.push(this.history.pop()!);
     await this.canvas.loadFromJSON(this.history.at(-1)!);
@@ -395,7 +414,7 @@ export class WhiteboardEngine {
   }
   private erase(event: TPointerEvent) {
     const target = this.canvas.findTarget(event).target;
-    if (target && !target.isLocked) { this.canvas.remove(...this.withLabels([target])); this.erased = true; this.canvas.requestRenderAll(); }
+    if (target && !target.isLocked && !this.blocksRemoval(this.withLabels([target]))) { this.canvas.remove(...this.withLabels([target])); this.erased = true; this.canvas.requestRenderAll(); }
   }
   private anchor(object: FabricObject, other: Point) {
     const b = object.getBoundingRect(); const center = object.getCenterPoint(); const dx = other.x - center.x, dy = other.y - center.y; const scale = 1 / Math.max(Math.abs(dx) / (b.width / 2 + 6), Math.abs(dy) / (b.height / 2 + 6), 1);
@@ -534,9 +553,9 @@ export class WhiteboardEngine {
     if (object.labelFor) {
       object.set({ selectable: false, evented: false }); this.editingLabel = null;
       const owner = this.canvas.getObjects().find(item => item.id === object.labelFor);
-      if (!object.text.trim() && owner?.muzeKind !== 'frame') this.canvas.remove(object);
+      if (!object.text.trim() && owner?.muzeKind !== 'frame' && !this.protectedId(object.id)) this.canvas.remove(object);
       if (owner) this.canvas.setActiveObject(owner);
-    } else if (!object.text.trim() && !(object instanceof MuzeNote)) { this.canvas.discardActiveObject(); this.canvas.remove(object); }
+    } else if (!object.text.trim() && !(object instanceof MuzeNote) && !this.protectedId(object.id)) { this.canvas.discardActiveObject(); this.canvas.remove(object); }
     this.checkpoint();
   }
   private makeLabel(owner: FabricObject, text = '') {
@@ -609,7 +628,7 @@ export class WhiteboardEngine {
     object.initDimensions(); this.growText(object); this.checkpoint();
   }
   selectAll() { this.setTool('select'); this.canvas.discardActiveObject(); this.canvas.setActiveObject(new ActiveSelection(this.canvas.getObjects().filter(o => o.selectable && !o.isLocked), { canvas: this.canvas })); this.canvas.requestRenderAll(); this.emit(); }
-  remove() { const selected = this.withLabels(this.canvas.getActiveObjects().filter(o => !o.isLocked)); this.canvas.discardActiveObject(); this.canvas.remove(...selected); this.checkpoint(); }
+  remove() { const selected = this.withLabels(this.canvas.getActiveObjects().filter(o => !o.isLocked)); if (this.blocksRemoval(selected)) return; this.canvas.discardActiveObject(); this.canvas.remove(...selected); this.checkpoint(); }
   private withLabels(selected: FabricObject[]) {
     const ids = new Set(selected.map(o => o.id));
     return [...new Set([...selected, ...this.canvas.getObjects().filter(o => o.labelFor && ids.has(o.labelFor) || o.frameId && ids.has(o.frameId))])];
@@ -660,6 +679,7 @@ export class WhiteboardEngine {
       if (selected.length > 1) { this.canvas.discardActiveObject(); this.canvas.setActiveObject(new ActiveSelection(selected, { canvas: this.canvas })); }
     }
     const active = this.canvas.getActiveObject();
+    if (ungroup && active instanceof Group && this.protectedId(active.id)) { this.warnProtected(); return; }
     if (ungroup && active instanceof Group && !(active instanceof ActiveSelection)) { this.canvas.discardActiveObject(); const objects = active.removeAll(); this.canvas.remove(active); this.canvas.add(...objects); this.canvas.setActiveObject(new ActiveSelection(objects, { canvas: this.canvas })); }
     else if (active instanceof ActiveSelection) { const objects = active.removeAll(); this.canvas.discardActiveObject(); this.canvas.remove(...objects); const group = new Group(objects, { id: crypto.randomUUID() }); this.canvas.add(group); this.canvas.setActiveObject(group); }
     this.checkpoint();

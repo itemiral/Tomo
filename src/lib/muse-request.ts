@@ -5,6 +5,8 @@ export type MusePreparedContext = {
   project?: string;
   images?: MuseVisualInput[];
   anchorIds?: string[];
+  sharedBoardId?: string;
+  complete?: () => Promise<void>;
 };
 
 export type MuseProgress = 'context' | 'research' | 'vision' | 'thinking' | 'saving';

@@ -85,3 +85,20 @@ test('a slow peer scene load blocks stale-object drags and restores canvas inter
  expect((await objects(page))[0].left).toBe(100);
  expect((await objects(page))[1].text).toBe('Peer update');
 });
+
+
+test('active Muse context blocks delete, eraser and undo removal until its lease ends',async({page})=>{
+ await fixture(page);
+ await page.evaluate(()=>{const e=(window as any).engine;e.setProtectedObjects([{objectId:'one',expiresAt:new Date(Date.now()+60000).toISOString()}]);e.canvas.setActiveObject(e.canvas.getObjects()[0]);e.remove();});
+ expect((await objects(page)).map((o:any)=>o.id)).toEqual(['one','two']);
+ await page.evaluate(()=> (window as any).engine.setTool('eraser'));
+ await page.mouse.click(160,150);
+ expect((await objects(page)).map((o:any)=>o.id)).toEqual(['one','two']);
+ await page.evaluate(()=>{const e=(window as any).engine;e.setTool('select');e.addText('New note');const created=e.canvas.getObjects().at(-1);e.setProtectedObjects([{objectId:created.id,expiresAt:new Date(Date.now()+60000).toISOString()}]);e.undo();});
+ expect((await objects(page))).toHaveLength(3);
+ await page.evaluate(async()=>{const e=(window as any).engine;e.setProtectedObjects([]);await e.undo();});
+ expect((await objects(page))).toHaveLength(2);
+ await page.evaluate(()=>{const e=(window as any).engine;e.canvas.setActiveObject(e.canvas.getObjects()[0]);e.remove();});
+ expect((await objects(page)).map((o:any)=>o.id)).toEqual(['two']);
+ expect(await page.evaluate(()=> (window as any).errors)).toEqual(['Muse is using this note. You can delete it when the reply is finished.']);
+});
