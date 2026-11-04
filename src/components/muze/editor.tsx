@@ -126,7 +126,7 @@ export default function MuzeEditor() {
   const [editor, setEditor] = useState(INITIAL_EDITOR), [paint, setPaint] = useState(INITIAL_PAINT);
   const updateEditor = useCallback((value: EditorState) => { setEditor(value); setPaint(value.paint); }, []);
   const [dockHeight,setDockHeight]=useState(58);
-  const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(false), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
+  const [popup, setPopup] = useState<Popup>(null), [grid, setGrid] = useState(true), [dark, setDark] = useState(false), [minimap, setMinimap] = useState(false), [stylesOpen, setStylesOpen] = useState(false);
   const [toast, setToast] = useState(''), [contextPoint, setContextPoint] = useState({ x: 0, y: 0 });
   const [commentPlacement,setCommentPlacement]=useState<{x:number;y:number;nonce:number}|null>(null);
   const [renameDocument,setRenameDocument]=useState<{id:string;title:string}|null>(null);
@@ -147,7 +147,7 @@ export default function MuzeEditor() {
       if (cancelled) return;
       current.current = saved; setWorkspace(saved);
       setDark(localStorage.getItem('muze.theme') === 'dark');
-      setGrid(localStorage.getItem('muze.grid') === 'true');
+      setGrid(localStorage.getItem('muze.grid') !== 'false');
     }).catch(() => { if (!cancelled) setToast('Local storage is unavailable. Enable browser storage and reload.'); });
     return () => { cancelled = true; feedback.dispose(); saveFeedback.current = null; db.current?.close(); db.current = null; };
   }, []);
