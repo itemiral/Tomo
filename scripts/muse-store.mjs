@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, stat, writeFile, withStorageTransaction } from './muse-storage.mjs';
 import { join } from 'node:path';
 import { digest, privateDirectory } from './muse-local.mjs';
-import { MUSE_NOTE_TEMPLATES, cleanMuseNoteDefaults } from './muse-defaults.mjs';
+import { MUSE_NOTE_TEMPLATES, cleanMuseNoteDefaults, restoreMuseNoteDefaults } from './muse-defaults.mjs';
 import { retrievalTerms, filterAdd } from './muse-retrieval.mjs';
 
 export const NOTE_LIMIT = 512_000;
@@ -43,9 +43,11 @@ export async function ensureMuse(ownerId) {
     let name='Muse';try {const board=JSON.parse(await readFile(join(directory,'canvas.json'),'utf8'));if(typeof board.museName==='string')name=board.museName;}catch(e){if(e.code!=='ENOENT')throw e;}
     for (const key of ['soul', 'memory']) {
       const path = join(directory, key + '.md'), content = await readFile(path, 'utf8');
-      const cleaned = cleanMuseNoteDefaults(content, key, name);
+      let cleaned = cleanMuseNoteDefaults(content, key, name);
+      if (identity.noteDefaultsVersion !== 2) cleaned = restoreMuseNoteDefaults(cleaned, key, name);
       if (cleaned !== content) await replaceFile(path, cleaned);
     }
+    if (identity.noteDefaultsVersion !== 2) await replaceFile(join(directory, 'identity.json'), JSON.stringify({...identity, noteDefaultsVersion: 2}));
     return { id: identity.id, name };
   }, 2);
 }

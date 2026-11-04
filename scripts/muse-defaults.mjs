@@ -17,15 +17,28 @@ export const LEGACY_NOTE_TEMPLATES = {
   memory: '# Memory\n\n## About you\nAdd the context you want Muse to remember about you.\n\n## Preferences\n- How I like to plan:\n- How much detail I prefer:\n- Things to keep in mind:\n\n## Current focus\nAdd what you’re working on and what a good result looks like.\n\n## Decisions worth keeping\nRecord choices, useful discoveries, and things to revisit.\n',
 };
 
-// Notes contain what the owner and Muse have learned, not onboarding copy.
-// Neutral behavior still comes from DEFAULT_MUSE_STYLE at request time.
-export const MUSE_NOTE_TEMPLATES = { soul: '# Soul\n', memory: '# Memory\n' };
+// Neutral starting notes adapt through learned entries and owner edits.
+export const MEMORY_INTRODUCTION = 'Your Muse learns what matters to you as you work together. Useful preferences, decisions, and ongoing projects will collect here to make its help more personal. You can edit or remove anything.';
+export const MUSE_NOTE_TEMPLATES = {
+  soul: PREVIOUS_NOTE_TEMPLATES.soul.split('\n\n## Make me yours')[0] + '\n',
+  memory: '# Memory\n\n' + MEMORY_INTRODUCTION + '\n',
+};
+
+export function restoreMuseNoteDefaults(content, target, name = 'Muse') {
+  const learned = [...content.matchAll(/<!-- muze-learned:start -->[\s\S]*?<!-- muze-learned:end -->/g)].map(match => match[0]);
+  let ownerText = content.replace(/<!-- muze-learned:start -->[\s\S]*?<!-- muze-learned:end -->/g, '').trim();
+  const nameLine = `My name is ${name}.\n\n`;
+  if (target === 'soul' && ownerText.startsWith(nameLine)) ownerText = ownerText.slice(nameLine.length).trim();
+  if (ownerText && ownerText !== (target === 'soul' ? '# Soul' : '# Memory')) return content;
+  const initial = MUSE_NOTE_TEMPLATES[target].replace('I’m Muse,', () => `I’m ${name},`).trimEnd();
+  return initial + (learned.length ? '\n\n' + learned.join('\n\n') : '') + '\n';
+}
 
 export function cleanMuseNoteDefaults(content, target, name = 'Muse') {
   let result = content;
-  for (const template of [PREVIOUS_NOTE_TEMPLATES, LEGACY_NOTE_TEMPLATES].flatMap(templates => [...new Set([name, 'Muse'])].map(alias => templates[target].replace('I’m Muse,', `I’m ${alias},`).trimEnd()))) {
+  for (const template of [PREVIOUS_NOTE_TEMPLATES, LEGACY_NOTE_TEMPLATES].flatMap(templates => [...new Set([name, 'Muse'])].map(alias => templates[target].replace('I’m Muse,', () => `I’m ${alias},`).trimEnd()))) {
     if (result.trimEnd() === template || result.startsWith(template + '\n')) {
-      result = MUSE_NOTE_TEMPLATES[target].trimEnd() + result.slice(template.length);
+      result = MUSE_NOTE_TEMPLATES[target].replace('I’m Muse,', () => `I’m ${name},`).trimEnd() + result.slice(template.length);
       break;
     }
   }

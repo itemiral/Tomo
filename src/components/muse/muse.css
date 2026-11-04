@@ -152,7 +152,7 @@
 
 .muse-context-area{position:absolute;left:1090px;top:0;width:340px;margin:0}.muse-context-tools{flex-wrap:wrap}.muse-context-cards article{width:340px}.muse-context-cards textarea{height:150px}.muse-context-area .board-comments-panel{max-height:440px;overflow:auto}.muse-context-area .board-comment{font-size:13px}.muse-context-area .board-comments textarea{min-height:60px}
 
-@media(max-width:700px){.muze-header:has(.muze-sign-in){flex-wrap:wrap}.muze-header:has(.muze-sign-in) .muze-brand>span{display:inline}.muze-header:has(.muze-sign-in) .muze-project{flex-basis:100%}.muze-header:has(.muze-sign-in) .muze-header-right{margin-left:auto}.muze-tools>.muze-button{flex-shrink:0}}
+@media(max-width:700px){.muze-tools>.muze-button{flex-shrink:0}}
 
 /* Simplified surfaces using the original palette; drawing tools remain the shared Fabric controls. */
 .muze-project{box-shadow:0 3px 12px #202c3d08;border-color:var(--line)}

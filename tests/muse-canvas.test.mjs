@@ -54,7 +54,7 @@ test('renaming Muse updates the canonical introduction through successive names 
  for (const name of ['Kumo', 'Nova', 'Muse']) {
   snapshot = renameDraft(await readMuseCanvas(owner), name);
   const saved = await saveMuseCanvas(owner, snapshot);
-  const expected = 'My name is ' + name + '.\n\n' + initialSoul + customBody;
+  const expected = initialSoul.replace('I’m Muse,', () => 'I’m ' + name + ',') + customBody;
   assert.equal((await readMuseNote(owner, 'soul')).content, expected);
   assert.equal((await readMuseNote(owner, 'memory')).content, memory);
   const reloaded = await readMuseCanvas(owner);
@@ -147,4 +147,19 @@ test('reopening an older renamed notebook repairs only its exact default soul in
   await readMuseCanvas(owner);
   assert.equal(await readFile(path, 'utf8'), custom);
  }
+});
+
+
+test('refreshing a renamed legacy default keeps the chosen Muse identity and custom suffix', async () => {
+  const {LEGACY_NOTE_TEMPLATES} = await import('../scripts/muse-defaults.mjs');
+  const owner='renamed-default-refresh';
+  await saveMuseCanvas(owner,renameDraft(await readMuseCanvas(owner),'Kumo'));
+  const content=LEGACY_NOTE_TEMPLATES.soul.replace('I’m Muse,','I’m Kumo,')+'\nMy handwritten reminder.';
+  await writeFile(join(museDirectory(owner),'soul.md'),content);
+  const result=await readMuseCanvas(owner);
+  const soul=card(result,'muse-file-soul').markdown;
+  assert.equal(result.board.museName,'Kumo');
+  assert.match(soul,/I’m Kumo, your companion/);
+  assert.doesNotMatch(soul,/I’m Muse,|Make me yours/);
+  assert.match(soul,/My handwritten reminder/);
 });
