@@ -31,7 +31,7 @@ export async function generateBoardImage(owner,prompt,signal,fetcher=fetch){
   const error=await readToolJson(response,50_000).catch(()=>null);
   if(error?.error?.code==='content_policy_violation')throw new MuseStoreError(400,'Muse could not generate that image. Try a different description.');
   if(response.status===429)throw new MuseStoreError(429,'Image generation is busy. Try again shortly.');
-  throw new MuseStoreError(502,'Muse could not generate the image. No automatic retry was made.');
+  throw new MuseStoreError(502,'Muse could not generate the image. Try again.');
  }
  const data=await readToolJson(response,17_000_000),encoded=data.data?.[0]?.b64_json;
  if(typeof encoded!=='string'||!encoded.length||encoded.length>16_000_000||!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))throw new MuseStoreError(502,'Muse returned no usable image.');

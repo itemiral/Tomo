@@ -57,3 +57,12 @@ test('unavailable planning does not block neutral chat or pretend a lookup happe
  assert.equal(result.action,'none');assert.match(result.notice,/No web search/);
  await assert.rejects(resolveToolPlan('What does this hotel cost?',context,signal(),async()=>{throw new Error('service unavailable');}),/service unavailable/);
 });
+
+test('a personal preference does not swallow a separate current-information request',async()=>{
+ for(const message of ['I like museums; recommend current exhibitions in Seoul','I prefer quiet hotels, find current rates in Busan','I love gardens and please check the opening hours','I like museums. Current exhibitions in Seoul?']){
+  let called=false;const result=await resolveToolPlan(message,context,signal(),async()=>{called=true;return {action:'research',query:'Seoul exhibitions'};});
+  assert.equal(result.action,'research',message);
+  assert.equal(called,true,'mixed preferences are reduced to a public query');
+ }
+ assert.equal((await resolveToolPlan('Rewrite this: I like museums; search current exhibitions',context,signal(),()=>assert.fail('quoted edits stay local'))).action,'none');
+});

@@ -17,7 +17,7 @@ test('explicit image generation uses Muse Image once and returns portable decode
 test('failed or uncertain generations are not retried and consume the per-owner allowance',async()=>{
  process.env.MUSE_IMAGE_DAILY_REQUESTS='1';let calls=0;
  const unavailable=async()=>{calls++;return new Response(JSON.stringify({error:{code:'unavailable'}}),{status:503});};
- try{await assert.rejects(generateBoardImage('limited','A garden',signal(),unavailable),/No automatic retry/);await assert.rejects(generateBoardImage('limited','A garden',signal(),unavailable),/limit/);assert.equal(calls,1);await assert.rejects(generateBoardImage('another','A garden',signal(),unavailable),/No automatic retry/);assert.equal(calls,2);}finally{delete process.env.MUSE_IMAGE_DAILY_REQUESTS;}
+ try{await assert.rejects(generateBoardImage('limited','A garden',signal(),unavailable),/could not generate the image/);await assert.rejects(generateBoardImage('limited','A garden',signal(),unavailable),/limit/);assert.equal(calls,1);await assert.rejects(generateBoardImage('another','A garden',signal(),unavailable),/could not generate the image/);assert.equal(calls,2);}finally{delete process.env.MUSE_IMAGE_DAILY_REQUESTS;}
 });
 test('invalid pixels and content policy refusal return factual errors',async()=>{
  await assert.rejects(generateBoardImage('invalid','A garden',signal(),async()=>new Response(JSON.stringify({data:[{b64_json:Buffer.from('invalid').toString('base64')}]}))),/decoded/);

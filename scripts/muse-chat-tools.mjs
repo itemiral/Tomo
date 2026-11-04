@@ -18,7 +18,8 @@ export function toolRestrictions(message){
  const localEdit=/^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:rewrite|rephrase|shorten|translate|format|rename|move|resize|delete)\b/i.test(text);
  const localEvidence=/\b(?:from|in|using|based on|according to)\s+(?:(?:just|only)\s+)?(?:these|those|my|our|the|selected)\s+(?:notes|cards|board|text|documents?|selection|table)\b/i.test(text);
  const preference=/^(?:(?:please\s+)?remember\s+(?:that\s+)?)?(?:I|we)\s+(?:prefer|like|love|usually|always|never)\b|^(?:please\s+)?(?:be (?:playful|concise|brief|friendly|formal)|always (?:use|keep|reply|speak)|(?:reply|speak|respond) (?:in|with))\b/i.test(text);
- return {offline:offline||multilingualOffline,local:localEdit||preference||localEvidence&&!explicitSearch};
+ const mixedRequest=/(?:[;.!?\n,]\s*|\b(?:and|so|but)\s+|\b(?:can|could|would)\s+you\s+)(?:please\s+)?(?:recommend|suggest|find|check|search|look\s*up|show|get|latest|current)\b/i.test(text);
+ return {personal:preference,offline:offline||multilingualOffline,local:localEdit||preference&&!mixedRequest||localEvidence&&!explicitSearch&&!mixedRequest};
 }
 export function toolIntent(message){
  const {offline,local}=toolRestrictions(message);
@@ -43,7 +44,7 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
  const generation=/\b(?:generate|create|draw|make|design|render|illustrate)\b[\s\S]*\b(?:image|picture|illustration|logo|poster|artwork|photo)\b/i.test(message);
  // Clear public queries retain the quick path; a model resolves ambiguous subjects
  // and requests in other languages instead of extending a keyword dictionary.
- if(intent.search&&!intent.images&&!contextual&&!nonEnglish&&message.length<=600)return {action:'research',query:publicToolText(message)};
+ if(intent.search&&!intent.images&&!contextual&&!nonEnglish&&!restrictions.personal&&message.length<=600)return {action:'research',query:publicToolText(message)};
  const localChat=/^(?:hi|hello|hey|thanks|thank you|yes|no|ok|okay)[.! ]*$/i.test(message)||/^(?:please )?(?:outline|brainstorm|organize|summarize|explain|continue|make (?:this|it|these) (?:concise|shorter|clearer)|add (?:a )?(?:note|card))\b/i.test(message);
  const publicOptions=/\b(?:recommend|suggest|best|nearby|hotels?|restaurants?|flights?|venues?|tickets?|products?|destinations?|travel|trip|vacation|weather|prices?|latest|availability)\b/i.test(message);
  if(!intent.search&&!intent.images&&!generation&&!nonEnglish&&localChat&&!publicOptions)return {action:'none',query:''};
