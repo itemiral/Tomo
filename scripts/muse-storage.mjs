@@ -8,7 +8,7 @@ import { digest, privateDirectory } from './muse-local.mjs';
 const requests = new AsyncLocalStorage();
 const transactions = new AsyncLocalStorage();
 const leases = new AsyncLocalStorage();
-const filename = /^(?:identity\.json|soul\.md|memory\.md|canvas\.json|board\.json|icon\.png|avatar(?:-previous|-operations)?\.json|search-usage\.json|(?:chat|task)-[a-f0-9]{64}\.json)$/;
+const filename = /^(?:identity\.json|soul\.md|memory\.md|canvas\.json|board\.json|icon\.png|avatar(?:-previous|-operations)?\.json|(?:search|image)-usage\.json|(?:chat|task)-[a-f0-9]{64}\.json)$/;
 const profileFiles = ['identity.json', 'soul.md', 'memory.md', 'canvas.json', 'avatar.json', 'icon.png'];
 
 export class StorageError extends Error {
