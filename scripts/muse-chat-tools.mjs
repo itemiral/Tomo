@@ -34,6 +34,12 @@ export function toolIntent(message){
  return {images,search:explicitSearch||publicBrief||request&&(currentFact||marketFact)};
 }
 
+function explicitImageSubject(message){
+ const match=message.trim().match(/^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:generate|create|draw|make|design|render|illustrate)\s+(?:(?:me|for me)\s+)?(?:(?:an?|the)\s+)?(?:image|picture|illustration|logo|poster|artwork|photo)\s+(?:of|showing|depicting)\s+(.+)$/is);
+ const subject=match?.[1].replace(/[.!?]+$/,'').trim();
+ return !!subject&&!/^(?:it|this|that|these|those|something|anything)$/i.test(subject);
+}
+
 export async function resolveToolPlan(message,context,signal,planner=planMuseTools){
  const restrictions=toolRestrictions(message);
  if(restrictions.offline||restrictions.local)return {action:'none',query:''};
@@ -48,7 +54,13 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
  const localChat=/^(?:hi|hello|hey|thanks|thank you|yes|no|ok|okay)[.! ]*$/i.test(message)||/^(?:please )?(?:outline|brainstorm|organize|summarize|explain|continue|make (?:this|it|these) (?:concise|shorter|clearer)|add (?:a )?(?:note|card))\b/i.test(message);
  const publicOptions=/\b(?:recommend|suggest|best|nearby|hotels?|restaurants?|flights?|venues?|tickets?|products?|destinations?|travel|trip|vacation|weather|prices?|latest|availability)\b/i.test(message);
  if(!intent.search&&!intent.images&&!generation&&!nonEnglish&&localChat&&!publicOptions)return {action:'none',query:''};
- try{return await planner(message,context,signal);}catch(error){
+ try{
+  const plan=await planner(message,context,signal);
+  // An unmistakable image request cannot fall through to a text-only success.
+  // Do not guess a prompt or retry a paid tool when selection did not succeed.
+  if(plan.action==='none'&&explicitImageSubject(message))throw new MuseStoreError(502,'Muse did not prepare an image for this request. Try again.');
+  return plan;
+ }catch(error){
   if(signal.aborted||intent.search||intent.images||generation||nonEnglish||publicOptions)throw error;
   return {action:'none',query:'',notice:'Tool selection was unavailable. No web search, image lookup or generation ran. Answer ordinary questions from the supplied context or general knowledge. Do not claim current facts were verified or images prepared; if this request needs a tool, explain that the lookup could not run.'};
  }

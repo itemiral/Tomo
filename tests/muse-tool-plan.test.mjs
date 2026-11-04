@@ -40,6 +40,14 @@ test('generation is separate from real image search and requires explicit reques
  assert.equal(prompt,'A moon garden in watercolor');assert.equal(result.images.length,1);assert.deepEqual(result.sources,[]);
  await assert.rejects(planMuseTools('Draw a moon',context,signal(),async()=>response({action:'execute_shell',query:'bad',explicitImageRequest:true})),/prepare/);
 });
+test('an explicit generation with a subject cannot silently become text-only chat',async()=>{
+ for(const message of ['can you generate me an image of banana with face','Please create a picture showing a friendly banana','Draw an image of a moon garden']){
+  await assert.rejects(resolveToolPlan(message,context,signal(),async()=>({action:'none',query:''})),/did not prepare an image/,message);
+ }
+ for(const message of ['Can you generate images?','Explain how to generate an image of a banana','Rewrite this: generate an image of a banana','Do not search: generate an image of a banana','Create an image of this']){
+  assert.equal((await resolveToolPlan(message,context,signal(),async()=>({action:'none',query:''}))).action,'none',message);
+ }
+});
 test('image lookup falls back to a source-backed Wikipedia thumbnail if Commons fails',async()=>{
  const requests=[];const result=await findBoardImage('Seoul skyline',signal(),async url=>{requests.push(new URL(url));if(url.includes('commons.wikimedia.org'))return new Response('Unavailable',{status:503});return new Response(JSON.stringify({query:{pages:{1:{title:'Seoul',fullurl:'https://en.wikipedia.org/wiki/Seoul',thumbnail:{source:'https://upload.wikimedia.org/photo.webp'}}}}}));},async url=>({src:'data:image/webp;base64,pixels',sourceUrl:url,retrievedAt:'now'}));
  assert.equal(requests.length,2);assert.equal(result.sourceUrl,'https://en.wikipedia.org/wiki/Seoul');assert.equal(result.imageUrl,'https://upload.wikimedia.org/photo.webp');
