@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useRef,useState,type CSSProperties} from 'react';
+import {useEffect,useId,useRef,useState,type CSSProperties} from 'react';
 import {MuseAvatarImage} from '../muse/avatar-image';
 import type {BoardProfile,BoardProfiles} from './board-profiles';
 import '../muse/muse.css';
@@ -41,8 +41,12 @@ function workBox(person:BoardPerson,items:WorkItem[],viewport:number[]){
 }
 export function BoardPeerMuses({peers,userId,pageId,profiles={},items=[],viewport=[1,0,0,1,0,0]}:{peers:BoardPerson[];userId?:string;pageId:string;profiles?:BoardProfiles;items?:WorkItem[];viewport?:number[]}){
   const people=uniquePeople(peers.filter(person=>person.userId!==userId&&person.pageId===pageId));
-  const visible=people.slice(0,4).map(person=>({person,box:workBox(person,items,viewport)}));
+  const [expanded,setExpanded]=useState(false),listId=useId(),toggle=useRef<HTMLButtonElement>(null);
+  const open=expanded&&people.length>2,visible=open?people:people.slice(0,2);
+  const working=people.map(person=>({person,box:workBox(person,items,viewport)})).filter(entry=>entry.box);
   const roster=useRef<HTMLElement>(null),[bottom,setBottom]=useState(108);
+  useEffect(()=>setExpanded(false),[pageId,userId]);
+  useEffect(()=>{if(people.length<=2)setExpanded(false);},[people.length]);
   useEffect(()=>{
     if(!people.length)return;
     const place=()=>{
@@ -52,21 +56,29 @@ export function BoardPeerMuses({peers,userId,pageId,profiles={},items=[],viewpor
       setBottom(Math.round(next));
     };
     const observer=new ResizeObserver(place);
-    for(const selector of ['.muze-toolbar-dock','.muse-chat-stack']){const element=document.querySelector(selector);if(element)observer.observe(element);}
+    const controls='.muze-toolbar-dock,.muse-chat-stack',observed=new Set<Element>();
+    const watchControls=()=>{
+      for(const element of observed)if(!element.isConnected){observer.unobserve(element);observed.delete(element);}
+      for(const element of document.querySelectorAll(controls))if(!observed.has(element)){observed.add(element);observer.observe(element);}
+      place();
+    };
+    // The composer may mount after the owner's Muse profile has loaded.
+    const mounted=new MutationObserver(records=>{if(records.some(record=>[...record.addedNodes,...record.removedNodes].some(node=>node instanceof Element&&(node.matches(controls)||node.querySelector(controls)))))watchControls();});
+    const app=roster.current?.closest('.muze-app');if(app)mounted.observe(app,{childList:true,subtree:true});
     if(roster.current)observer.observe(roster.current);
-    window.addEventListener('resize',place);place();
-    return()=>{observer.disconnect();window.removeEventListener('resize',place);};
+    window.addEventListener('resize',place);watchControls();
+    return()=>{observer.disconnect();mounted.disconnect();window.removeEventListener('resize',place);};
   },[people.length]);
   return <>
-    <div className="board-muse-targets" aria-label="Muse activity">{visible.filter(entry=>entry.box).map(({person,box})=><div key={person.userId} data-target-id={person.museTargetId}><span className="board-muse-target-outline" aria-hidden="true" style={{left:box!.x-6,top:box!.y-6,width:box!.w+12,height:box!.h+12,color:personColor(person.userId)}}/></div>)}</div>
-    {!!people.length&&<aside ref={roster} className="board-peer-muses" aria-label="Collaborators’ Muses" data-muse-ui="true" style={{'--peer-muses-bottom':bottom+'px'} as CSSProperties}>
+    <div className="board-muse-targets" aria-label="Muse activity">{working.map(({person,box})=><div key={person.userId} data-target-id={person.museTargetId}><span className="board-muse-target-outline" aria-hidden="true" style={{left:box!.x-6,top:box!.y-6,width:box!.w+12,height:box!.h+12,color:personColor(person.userId)}}/></div>)}</div>
+    {!!people.length&&<aside ref={roster} className={'board-peer-muses'+(open?' expanded':'')} aria-label="Collaborators’ Muses" data-muse-ui="true" style={{'--peer-muses-bottom':bottom+'px'} as CSSProperties} onKeyDown={event=>{if(open&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setExpanded(false);toggle.current?.focus();}}}>
       <header><span>Muses</span><small>{people.length} here</small></header>
-      <div className="board-peer-muse-list">{visible.map(({person})=>{const profile=profiles[person.userId],name=profile?.name||person.name,museName=profile?.museName||'Muse';return <div key={person.userId} className={'board-peer-muse'+(person.muse==='working'?' working':'')} aria-label={name+'’s '+museName+', '+person.muse}>
+      <div id={listId} className="board-peer-muse-list" role="region" aria-label="Muses on this page" tabIndex={open?0:undefined}>{visible.map(person=>{const profile=profiles[person.userId],name=profile?.name||person.name,museName=profile?.museName||'Muse';return <div key={person.userId} className={'board-peer-muse'+(person.muse==='working'?' working':'')} aria-label={name+'’s '+museName+', '+person.muse}>
         <div className="board-peer-muse-icon"><ParticipantMuse profile={profile}/><span className="board-peer-owner-avatar"><ParticipantAvatar name={name} src={profile?.avatarUrl}/></span></div>
         <div className="board-peer-muse-copy"><span title={museName}>{museName}</span><small title={name}>with {name}</small></div>
         <span className="board-peer-muse-state"><i aria-hidden="true"/>{person.muse==='working'?'Working':'Here'}</span>
       </div>;})}</div>
-      {people.length>4&&<span className="board-more-muses">+{people.length-4} more</span>}
+      {people.length>2&&<button ref={toggle} type="button" className="board-more-muses" aria-expanded={open} aria-controls={listId} onClick={()=>setExpanded(value=>!value)}>{open?'Show less':'+'+(people.length-2)+' more'}</button>}
     </aside>}
   </>;
 }
