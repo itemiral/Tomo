@@ -20,6 +20,7 @@ const fixture = globalThis.muzeRouteFixture = {
   leaseAction: async () => ({data:{expiresAt:new Date(Date.now()+90000).toISOString()},error:null}),
   sharedScene: null,
   ask: async () => ({ messages: [], actions: { cards: [], updates: [] } }),
+  cancel: async () => {},
   client(ownerId) {
     return { async rpc(name,args) { assert.equal(name,'shared_board_lease');fixture.leaseCalls.push({ownerId,...args});return fixture.leaseAction(args); }, from(table) {
       if(table==='shared_boards')return {select(){return this;},eq(){return this;},async maybeSingle(){return {data:{scene:fixture.sharedScene},error:null};}};
@@ -36,9 +37,9 @@ const mocks = {
   '@clerk/nextjs/server': `export async function auth() { const userId=globalThis.muzeRouteFixture.scope.getStore(); return {userId,sessionId:'fixture-session',getToken:async()=>'fixture-token'}; }`,
   '@/utils/supabase/shared': `export class SupabaseSessionError extends Error {} export function createAuthenticatedClient() { return globalThis.muzeRouteFixture.client(globalThis.muzeRouteFixture.scope.getStore()); }`,
   '@/utils/supabase/session': `export function serverSessionToken(_owner,_session,getToken) { return getToken; }`,
-  '@/server/muse/model': `export function askMuse(...args) { return globalThis.muzeRouteFixture.ask(...args); }`,
+  '@/server/muse/model': `export function askMuse(...args) { return globalThis.muzeRouteFixture.ask(...args); } export function cancelMuseChat(...args) { return globalThis.muzeRouteFixture.cancel(...args); }`,
 };
-const bundle = await build({ stdin: { contents: `export {POST} from './src/app/api/muse/chat/route'; export {PrivateError} from './src/server/muse/private';`, resolveDir: resolve('.'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'route-boundaries', setup(builder) {
+const bundle = await build({ stdin: { contents: `export {POST,DELETE} from './src/app/api/muse/chat/route'; export {PrivateError} from './src/server/muse/private';`, resolveDir: resolve('.'), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'route-boundaries', setup(builder) {
   builder.onResolve({ filter: /^server-only$/ }, () => ({ path: 'empty', namespace: 'route-test' }));
   builder.onResolve({ filter: /^(?:@clerk\/nextjs\/server|@\/utils\/supabase\/(?:shared|session)|@\/server\/muse\/model)$/ }, args => ({ path: args.path, namespace: 'route-test' }));
   builder.onLoad({ filter: /.*/, namespace: 'route-test' }, args => ({ contents: mocks[args.path] || '' }));
@@ -46,7 +47,7 @@ const bundle = await build({ stdin: { contents: `export {POST} from './src/app/a
   builder.onResolve({ filter: /\.mjs$/ }, args => ({ path: resolve(args.resolveDir, args.path), external: true }));
 } }] });
 const output = join(directory, 'route.mjs'); await writeFile(output, bundle.outputFiles[0].text);
-const { POST, PrivateError } = await import(pathToFileURL(output));
+const { POST, DELETE, PrivateError } = await import(pathToFileURL(output));
 const { readFile } = await import('../scripts/muse-storage.mjs');
 const { museDirectory } = await import('../scripts/muse-store.mjs');
 const originalFetch = globalThis.fetch;
@@ -97,6 +98,17 @@ test('consumer cancellation aborts generation and finishes the stream task', asy
   };
   const response = await post('owner-one'), reader = response.body.getReader(); await reader.read();
   await reader.cancel(); await stopped.promise; assert.equal(seenSignal.aborted, true);
+});
+
+test('explicit cancellation requires the owner session and same origin, and awaits the exact request release', async () => {
+  const gate=deferred(),calls=[],requestId='4a468f80-a4fe-4027-b6cd-a663df1095d5';
+  fixture.cancel=async(owner,id)=>{calls.push({owner,id});await gate.promise;};
+  const stop=(owner,origin='http://localhost:3201')=>scope.run(owner,()=>DELETE(new Request('http://localhost:3201/api/muse/chat',{method:'DELETE',headers:{Host:'localhost:3201',Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({requestId})})));
+  assert.equal((await stop(null)).status,401);assert.equal((await stop('owner-one','https://unrelated.example')).status,403);
+  assert.equal(calls.length,0);
+  let completed=false;const result=stop('owner-two').then(response=>{completed=true;return response;});
+  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(completed,false);assert.deepEqual(calls,[{owner:'owner-two',id:requestId}]);
+  gate.resolve();const response=await result;assert.equal(response.status,200);assert.deepEqual(await response.json(),{stopped:true});assert.match(response.headers.get('cache-control'),/private.*no-store/);
 });
 
 test('concurrent streamed requests preserve real owner storage scopes after awaiting', async () => {

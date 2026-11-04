@@ -118,17 +118,57 @@ export async function withMuseProfileSnapshot(operation) {
   }, 2);
 }
 
-export async function withMuseLease(ownerId, resource, operation) {
+export async function hasMuseLease(ownerId, resource, token) {
   const current = context();
-  if (!current) return operation();
+  if (!current) return true;
   if (current.ownerId !== ownerId) throw new StorageError(403, 'This Muse belongs to another owner.');
-  const token = randomUUID();
+  const { data, error } = await current.client.from('muse_private_leases').select('token,expires_at')
+    .eq('owner_id', ownerId).eq('resource', resource).maybeSingle();
+  if (error) throw databaseError(error, 'read_lease');
+  return data?.token === token && Date.parse(data.expires_at) > Date.now();
+}
+
+export async function cancelMuseLease(ownerId, resource, token) {
+  const current = context();
+  if (!current) return;
+  if (current.ownerId !== ownerId) throw new StorageError(403, 'This Muse belongs to another owner.');
+  const { error } = await current.client.rpc('release_muse_lease', { resource, lease_token: token });
+  if (error) throw databaseError(error, 'release_lease');
+  // An empty commit takes the same owner lock as notebook writes. Wait for any
+  // commit already past its lease check before acknowledging cancellation.
+  const { error: fenceError } = await current.client.rpc('commit_muse_files', {changes: [], held_leases: []});
+  if (fenceError) throw databaseError(fenceError, 'cancel_fence');
+}
+
+/** A supplied request token lets another worker cancel only this operation.
+ * @param {{token?: string, signal?: AbortSignal}} [options]
+ */
+export async function withMuseLease(ownerId, resource, operation, options = {}) {
+  const { token = randomUUID(), signal } = options;
+  const current = context();
+  if (!current) return operation(signal);
+  if (current.ownerId !== ownerId) throw new StorageError(403, 'This Muse belongs to another owner.');
+  signal?.throwIfAborted();
   const { data, error } = await current.client.rpc('acquire_muse_lease', { resource, lease_token: token });
   if (error) throw databaseError(error, 'acquire_lease');
   if (!data) throw new StorageError(409, 'Muse is still working. Try again in a moment.');
+  const cancelled = new AbortController();
+  const activeSignal = signal ? AbortSignal.any([signal, cancelled.signal]) : undefined;
+  let monitoring = false, finished = false;
+  const timer = signal ? setInterval(async () => {
+    if (monitoring || finished || activeSignal.aborted) return;
+    monitoring = true;
+    try {
+      if (!await hasMuseLease(ownerId, resource, token)) cancelled.abort(new DOMException('Request cancelled.', 'AbortError'));
+    } catch { /* A temporary read failure does not cancel work; commits remain lease-fenced. */ }
+    finally { monitoring = false; }
+  }, 1000) : undefined;
+  timer?.unref?.();
   try {
-    return await leases.run([...(leases.getStore() || []), { resource, token }], operation);
+    activeSignal?.throwIfAborted();
+    return await leases.run([...(leases.getStore() || []), { resource, token }], () => operation(activeSignal));
   } finally {
+    finished = true; clearInterval(timer);
     // An interrupted request leaves a bounded lease; it never unlocks a newer worker.
     await Promise.resolve(current.client.rpc('release_muse_lease', { resource, lease_token: token })).catch(() => {});
   }

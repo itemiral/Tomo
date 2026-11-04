@@ -5,7 +5,7 @@ import { ArrowUp, Plus, Square, X } from 'lucide-react';
 import { MuseMarkdown, museRequest, RequestError, type MuseProfile } from './shared';
 import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import { museProgressLabel, type MusePreparedContext, type MuseProgress } from '@/lib/muse-request';
-import { sendMuseChat } from './chat-request';
+import { sendMuseChat, MuseStopError } from './chat-request';
 import {museRequestLease} from './request-lease';
 import {MUSE_SCENE_CHANGED} from '@/lib/shared-board-leases';
 import { personalMuseError } from '@/lib/muse-error';
@@ -51,7 +51,7 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
         requestFocus=Array.isArray(focus)?focus.filter((id:unknown):id is string=>typeof id==='string'):[];
         const workingIds = requestFocus.length ? requestFocus : packet.anchorIds || [];
         onThinking(true,workingIds,'context');expand();
-        const requestId=packet.sharedBoardId?crypto.randomUUID():undefined;
+        const requestId=crypto.randomUUID();
         lease=packet.sharedBoardId&&requestId?museRequestLease(packet.sharedBoardId,requestId,abort.signal):undefined;
         try {
           result = await sendMuseChat({thread,board:packet.board,project:packet.project,images:packet.images,message,sharedBoardId:packet.sharedBoardId,requestId},abort.signal,phase=>{if(mounted.current&&!abort.signal.aborted){setPhase(phase);onThinking(true,workingIds,phase);}});
@@ -76,7 +76,8 @@ export function MuseChat({ attachImage, expand, beforeSend, prepareContext, sele
         if(result.personalizationUpdated)window.dispatchEvent(new CustomEvent('muse-personalization-updated',{detail:{ownerId:profile.ownerId}}));
       }
     } catch (cause) {
-      if (abort.signal.aborted || !mounted.current) return;
+      if (!mounted.current) return;
+      if (abort.signal.aborted) { if (cause instanceof MuseStopError && !controller.current) setError(cause.message); return; }
       onThinking(false); setText(value=>value.trim()?value:message);
       if (cause instanceof RequestError && cause.status === 401) locked(); else setError((cause as Error).message);
     } finally { await lease?.release(); if (mounted.current && controller.current === abort) { controller.current=null;setBusy(false); setPending(''); } }

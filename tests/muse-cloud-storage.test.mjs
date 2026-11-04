@@ -9,7 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { createClient } from '@supabase/supabase-js';
 const localDirectory = await mkdtemp(join(tmpdir(), 'muze-cloud-test-'));
 process.env.MUZE_PRIVATE_DIR = localDirectory;
-const { withMuseStorage, withStorageTransaction, withMuseLease, readFile, writeFile, usesCloudStorage, migrateLocalMuse } = await import('../scripts/muse-storage.mjs');
+const { withMuseStorage, withStorageTransaction, withMuseLease, hasMuseLease, cancelMuseLease, readFile, writeFile, usesCloudStorage, migrateLocalMuse } = await import('../scripts/muse-storage.mjs');
 const { museDirectory, readMuseNote, saveMuseNote, ensureMuse } = await import('../scripts/muse-store.mjs');
 const { readMuseCanvas, saveMuseCanvas } = await import('../scripts/muse-canvas.mjs');
 const { replaceAvatar, readAvatar, uploadAvatar } = await import('../scripts/muse-avatar.mjs');
@@ -44,12 +44,16 @@ function asUser(ownerId, operation, role = 'authenticated') {
 function client(ownerId) {
   return {
     from(table) {
-      assert.equal(table, 'muse_private_files');
+      assert.ok(['muse_private_files','muse_private_leases'].includes(table));
       const conditions = {};
       const query = {
         select() { return query; },
         eq(key, value) { conditions[key] = value; return query; },
         async maybeSingle() {
+          if(table==='muse_private_leases') {
+            const result=await asUser(ownerId,tx=>tx.query('select token,expires_at from public.muse_private_leases where owner_id=$1 and resource=$2',[conditions.owner_id,conditions.resource]));
+            return {data:result.rows[0]||null,error:null};
+          }
           const result = await asUser(ownerId, tx => tx.query(
             'select name,content,version,updated_at from public.muse_private_files where owner_id=$1 and name=$2',
             [conditions.owner_id, conditions.name],
@@ -270,6 +274,53 @@ test('leases coordinate separate workers and prevent an expired worker from comm
   }));
   const held = await db.query('select token from public.muse_private_leases where owner_id=$1', [owner]);
   assert.equal(held.rows.length, 1, 'old worker must not release the new worker’s lease');
+});
+
+test('explicit cancellation fences late writes and leaves other owners and replacement requests intact',async()=>{
+ const owner='user_cancel_cloud',other='user_cancel_other',requestId=randomUUID(),replacement=randomUUID();
+ await cloud(owner,()=>ensureMuse(owner));
+ await cloud(other,()=>withMuseLease(other,'chat',async()=>{
+  await cloud(owner,()=>withMuseLease(owner,'chat',async()=>{
+   assert.equal(await hasMuseLease(owner,'chat',requestId),true);
+   await cloud(other,()=>cancelMuseLease(other,'chat',requestId));
+   assert.equal(await hasMuseLease(owner,'chat',requestId),true,'another owner cannot release this request');
+   await cloud(owner,()=>cancelMuseLease(owner,'chat',randomUUID()));
+   assert.equal(await hasMuseLease(owner,'chat',requestId),true,'an unrelated tab token cannot release this request');
+   await cloud(owner,()=>cancelMuseLease(owner,'chat',requestId));
+   assert.equal(await hasMuseLease(owner,'chat',requestId),false);
+   await assert.rejects(writeFile(join(museDirectory(owner),'memory.md'),'Cancelled response must not teach memory'),{status:409});
+   assert.equal((await client(owner).rpc('acquire_muse_lease',{resource:'chat',lease_token:replacement})).data,true);
+  },{token:requestId}));
+ }));
+ assert.equal(await cloud(owner,()=>hasMuseLease(owner,'chat',replacement)),true,'old finally must not release the replacement request');
+ await cloud(owner,()=>cancelMuseLease(owner,'chat',requestId));
+ assert.equal(await cloud(owner,()=>hasMuseLease(owner,'chat',replacement)),true);
+ assert.doesNotMatch((await cloud(owner,()=>readMuseNote(owner,'memory'))).content,/Cancelled response/);
+ await cloud(owner,()=>cancelMuseLease(owner,'chat',replacement));
+});
+
+test('a worker observes cancellation from a different storage session and aborts its inference signal',async()=>{
+ const owner='user_cancel_watcher',requestId=randomUUID(),abort=new AbortController();let observed;
+ await cloud(owner,()=>withMuseLease(owner,'chat',async signal=>{
+  observed=signal;assert.equal(signal.aborted,false);
+  await cloud(owner,()=>cancelMuseLease(owner,'chat',requestId));
+  await Promise.race([new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true})),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Cancellation watcher timed out')),2200))]);
+  assert.equal(signal.aborted,true);
+ },{token:requestId,signal:abort.signal}));
+ assert.equal(observed.reason.name,'AbortError');
+});
+
+test('cancellation acknowledgment waits for the owner commit fence after releasing its token',async()=>{
+ const owner='user_cancel_fence',requestId=randomUUID(),connection=client(owner),original=connection.rpc;
+ let releaseFence,atFence;const fence=new Promise(resolve=>{releaseFence=resolve;}),arrived=new Promise(resolve=>{atFence=resolve;});
+ assert.equal((await original('acquire_muse_lease',{resource:'chat',lease_token:requestId})).data,true);
+ connection.rpc=async(name,args)=>{
+  if(name==='commit_muse_files'){assert.deepEqual(args,{changes:[],held_leases:[]});atFence();await fence;}
+  return original(name,args);
+ };
+ let acknowledged=false;const cancellation=withMuseStorage(owner,connection,()=>cancelMuseLease(owner,'chat',requestId)).then(()=>{acknowledged=true;});
+ await arrived;assert.equal(acknowledged,false);assert.equal(await cloud(owner,()=>hasMuseLease(owner,'chat',requestId)),false);
+ releaseFence();await cancellation;assert.equal(acknowledged,true);
 });
 
 test('owner context cannot cross requests or write local files on a hosted runtime', async () => {
