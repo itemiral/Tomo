@@ -14,6 +14,15 @@ function needsPublicFacts(text){
  const marketFact=/\b(?:prices?|costs?|fares?|rates?|availability|available|flights?|hotels?|tickets?)\b|\bin stock\b|\bopening hours\b/i.test(text);
  return currentFact||marketFact;
 }
+function ordinaryPlanning(message){
+ return /\b(?:plan|planning|outline|organize|brainstorm)\b|\bmake\s+(?:a|the|our|my)\s+trip\b/i.test(message)&&!needsPublicFacts(message);
+}
+function imageGenerationRequest(message){
+ return /\b(?:generate|create|draw|make|design|render|illustrate)\b[\s\S]*\b(?:image|picture|illustration|logo|poster|artwork|photo)\b/i.test(message);
+}
+function accountUnavailable(error){
+ return ['auth','configuration','disabled'].includes(error?.kind)||[401,403,429].includes(error?.status);
+}
 
 export function toolRestrictions(message){
  const text=message.replace(/[’‘]/g,"'");
@@ -65,7 +74,7 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
  if(urls.length)return {action:'image_search',query:message};
  const contextual=/\b(?:this|that|these|those|it|them|here|there|above|same|again)\b/i.test(message);
  const nonEnglish=/[^\p{Script=Latin}\p{Number}\p{Punctuation}\p{Separator}\p{Symbol}\s]/u.test(message);
- const generation=/\b(?:generate|create|draw|make|design|render|illustrate)\b[\s\S]*\b(?:image|picture|illustration|logo|poster|artwork|photo)\b/i.test(message);
+ const generation=imageGenerationRequest(message);
  // Clear public queries retain the quick path; a model resolves ambiguous subjects
  // and requests in other languages instead of extending a keyword dictionary.
  if(intent.search&&!intent.images&&!contextual&&!nonEnglish&&!restrictions.personal&&message.length<=600)return {action:'research',query:publicToolText(message)};
@@ -73,9 +82,9 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
  const publicOptions=/\b(?:recommend|suggest|best|nearby|hotels?|restaurants?|flights?|venues?|tickets?|products?|destinations?|travel|trip|vacation|weather|prices?|latest|availability)\b/i.test(message);
  // A rough plan can still be useful without a lookup. This changes only failure
  // recovery: successful routing still researches public options as usual.
- const ordinaryPlanning=/\b(?:plan|planning|outline|organize|brainstorm)\b|\bmake\s+(?:a|the|our|my)\s+trip\b/i.test(message)&&!needsPublicFacts(message);
+ const planning=ordinaryPlanning(message);
  const recentImageRequest=(context?.history||[]).slice(-4).some(item=>item.role==='user'&&(imageRequestSubject(item.content)||toolIntent(item.content).images||/\b(?:draw|illustrate|render)\b/i.test(item.content)));
- const imageContinuation=recentImageRequest&&!ordinaryPlanning;
+ const imageContinuation=recentImageRequest&&!planning;
  if(!intent.search&&!intent.images&&!generation&&!nonEnglish&&!imageContinuation&&localChat&&!publicOptions&&!needsPublicFacts(message))return {action:'none',query:''};
  try{
   const plan=await planner(message,context,signal);
@@ -84,8 +93,7 @@ export async function resolveToolPlan(message,context,signal,planner=planMuseToo
   if(plan.action==='none'&&subject&&!qualifiedImageRequest(subject)&&!/^(?:it|this|that|these|those)$/i.test(subject))throw new MuseStoreError(502,'Muse did not prepare an image for this request. Try again.');
   return plan;
  }catch(error){
-  const unavailableAccount=['auth','configuration'].includes(error?.kind)||[401,403,429].includes(error?.status);
-  if(signal.aborted||unavailableAccount||intent.search||intent.images||generation||nonEnglish||imageContinuation||needsPublicFacts(message)||publicOptions&&!ordinaryPlanning)throw error;
+  if(signal.aborted||accountUnavailable(error)||intent.search||intent.images||generation||nonEnglish||imageContinuation||needsPublicFacts(message)||publicOptions&&!planning)throw error;
   return {action:'none',query:'',notice:'Tool selection was unavailable. No web search, image lookup or generation ran. Answer ordinary questions from the supplied context or general knowledge. Do not claim current facts were verified or images prepared; if this request needs a tool, explain that the lookup could not run.'};
  }
 }
@@ -125,7 +133,7 @@ export async function findBoardImage(query,signal,fetcher=fetch,importer=importI
 export async function runChatTools(owner,message,signal,deps={},context){
  const intent=toolIntent(message);
  const plan=context?await resolveToolPlan(message,context,signal,deps.planner):{action:intent.images?'image_search':intent.search?'research':'none',query:publicToolText(message)};
- const images=[],sources=[];let research=null;
+ const images=[],sources=[];let research=null,notice=plan.notice;
  if(plan.action!=='none')deps.onTool?.(plan.action);
  if(plan.action==='image_generate')images.push({id:randomUUID(),...await (deps.generate||generateBoardImage)(owner,plan.query,signal)});
  if(plan.action==='image_search'){
@@ -134,6 +142,15 @@ export async function runChatTools(owner,message,signal,deps={},context){
   else images.push({id:randomUUID(),...await (deps.findImage||findBoardImage)(plan.query,signal)});
   for(const image of images)if(image.sourceUrl)sources.push({url:image.sourceUrl,title:image.sourceTitle});
  }
- if(plan.action==='research'){await reserveSearch(owner);research=await (deps.research||researchGoal)(plan.query,signal);sources.push(...research.sources);}
- return {images,sources,research,...(plan.notice?{notice:plan.notice}:{})};
+ if(plan.action==='research'){
+  // Reserve outside recovery: account limits must never become a successful turn.
+  await reserveSearch(owner);
+  try{research=await (deps.research||researchGoal)(plan.query,signal);sources.push(...research.sources);}
+  catch(error){
+   const recoverable=['incomplete','truncated','provider','timeout','unavailable','invalid_response','no_sources'].includes(error?.kind);
+   if(signal.aborted||accountUnavailable(error)||!recoverable||!ordinaryPlanning(message)||intent.search||intent.images||imageGenerationRequest(message))throw error;
+   notice='Web research was attempted but did not return verified results. No current facts were verified. Prepare a useful first draft from the supplied board and general knowledge, and briefly say current details could not be checked. Do not use partial research, invent sources, or claim a successful search, verified prices, availability, or prepared images.';
+  }
+ }
+ return {images,sources,research,...(notice?{notice}:{})};
 }

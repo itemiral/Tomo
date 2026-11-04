@@ -1,6 +1,6 @@
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -12,11 +12,88 @@ process.env.MUZE_PRIVATE_DIR=join(dir,'private');process.env.MODEL_API_KEY='synt
 const bundle=await build({entryPoints:['src/server/muse/model.ts'],bundle:true,write:false,platform:'node',format:'esm',plugins:[{name:'test',setup(b){b.onResolve({filter:/^sharp$/},()=>({path:require.resolve('sharp'),external:true}));b.onResolve({filter:/^server-only$/},()=>({path:'empty',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:''}));b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));}}]});
 await writeFile(join(dir,'model.mjs'),bundle.outputFiles[0].text);
 const {askMuse}=await import(pathToFileURL(join(dir,'model.mjs')));
-const {readMuseNote,saveMuseNote,saveMuseChat}=await import('../scripts/muse-store.mjs');
+const {readMuseNote,saveMuseNote,saveMuseChat,museDirectory}=await import('../scripts/muse-store.mjs');
+const {runChatTools}=await import('../scripts/muse-chat-tools.mjs');
 const {readMuseLearning}=await import('../scripts/muse-learning.mjs');
 after(()=>rm(dir,{recursive:true,force:true}));
 const reply=value=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]}));
 const board={board:'Visit',page:'Garden',selectedIds:['garden'],objects:[{id:'garden',type:'MuzeNote',text:'San Francisco Botanical Garden',editable:true}]};
+test('the Tokyo request can produce a useful draft after research is selected but ends incomplete or unavailable',async()=>{
+ const original=globalThis.fetch;
+ const message='can you help me make a trip to Tokyo for 2 people, me and my girlfriend';
+ for(const failure of [
+  {owner:'tokyo-research-incomplete',response:()=>new Response(JSON.stringify({status:'incomplete',incomplete_details:{reason:'max_output_tokens'},output:[{type:'web_search_call',status:'completed'},{type:'message',status:'incomplete',content:[{type:'output_text',text:'PARTIAL-UNVERIFIED-RESEARCH',annotations:[{type:'url_citation',url:'https://example.org/partial',start_index:0,end_index:25}]}]}]}))},
+  {owner:'tokyo-research-unavailable',response:()=>new Response('Unavailable',{status:503})},
+ ]){
+  let researchCalls=0;const calls=[];
+  globalThis.fetch=async(url,options)=>{
+   const body=JSON.parse(options.body),schema=body.response_format?.json_schema?.name;calls.push(schema||'research');
+   if(schema==='MuzeToolPlan')return reply({action:'research',query:'Tokyo itinerary ideas for two people',explicitImageRequest:false});
+   if(url.endsWith('/responses')){researchCalls++;return failure.response();}
+   assert.equal(schema,'MuzePlan');
+   const prompt=JSON.stringify(body.messages);
+   assert.match(prompt,/Web research was attempted but did not return verified results/);
+   assert.match(prompt,/No current facts were verified/);assert.doesNotMatch(prompt,/PARTIAL-UNVERIFIED-RESEARCH|example\.org\/partial/);
+   return reply({reply:'I could not check current details, but here is a starting outline for your Tokyo trip.',cards:[{title:'Tokyo for two',body:'Choose your dates, trip length, and preferred pace.\nList the neighborhoods and activities you both want to explore.'}],updates:[],suggestions:[]});
+  };
+  try{
+   const result=await askMuse(failure.owner,{thread:'tokyo:first-turn',message,board:JSON.stringify({board:'Trip to Tokyo',page:'Page 1',objects:[],selectedIds:[]})},new AbortController().signal);
+   assert.equal(calls[0],'MuzeToolPlan');assert.equal(calls.at(-1),'MuzePlan');
+   assert.ok(researchCalls>=1&&researchCalls<=2,'Research recovery must remain bounded');
+   assert.equal(result.actions.cards.length,1);assert.equal(result.actions.cards[0].title,'Tokyo for two');
+   assert.equal(result.actions.images,undefined);assert.doesNotMatch(result.messages.at(-1).content,/Sources:/);
+   assert.equal((await readMuseLearning(failure.owner,'tokyo:first-turn')).messages.at(-1).content,result.messages.at(-1).content);
+   assert.equal(JSON.parse(await readFile(join(museDirectory(failure.owner),'search-usage.json'),'utf8')).count,1);
+  }finally{globalThis.fetch=original;}
+ }
+});
+
+test('research failure still stops explicit searches and requests for current facts before claiming a result',async()=>{
+ const original=globalThis.fetch;
+ for(const [index,message] of ['Check current Tokyo flight fares','Plan a trip to Tokyo with current prices','Search for Tokyo itinerary ideas'].entries()){
+  const owner='required-research-'+index;
+  globalThis.fetch=async(url,options)=>{
+   const schema=JSON.parse(options.body).response_format?.json_schema?.name;
+   if(schema==='MuzeToolPlan')return reply({action:'research',query:'Tokyo travel details',explicitImageRequest:false});
+   assert.ok(url.endsWith('/responses'),'Do not turn failed required research into an answer');
+   return new Response(JSON.stringify({status:'incomplete',incomplete_details:{reason:'max_output_tokens'},output:[]}));
+  };
+  try{
+   await assert.rejects(askMuse(owner,{thread:'tokyo:required',message,board:JSON.stringify(board)},new AbortController().signal));
+   assert.deepEqual((await readMuseLearning(owner,'tokyo:required')).messages,[]);
+  }finally{globalThis.fetch=original;}
+ }
+});
+
+test('research account failures cannot become successful planning drafts',async()=>{
+ const original=globalThis.fetch;
+ for(const status of [401,403,429]){
+  const owner='tokyo-research-account-'+status;let researchCalls=0;
+  globalThis.fetch=async(url,options)=>{
+   const schema=JSON.parse(options.body).response_format?.json_schema?.name;
+   if(schema==='MuzeToolPlan')return reply({action:'research',query:'Tokyo itinerary',explicitImageRequest:false});
+   assert.ok(url.endsWith('/responses'),'An account failure must not start the answer model');researchCalls++;
+   return new Response('Unavailable',{status});
+  };
+  try{
+   await assert.rejects(askMuse(owner,{thread:'tokyo:account',message:'Plan a trip to Tokyo for two',board:JSON.stringify(board)},new AbortController().signal));
+   assert.equal(researchCalls,1);assert.deepEqual((await readMuseLearning(owner,'tokyo:account')).messages,[]);
+  }finally{globalThis.fetch=original;}
+ }
+});
+
+test('research recovery preserves explicit image requests, quota failures and owner cancellation',async()=>{
+ const plan=async()=>({action:'research',query:'Tokyo itinerary'}),context={board,history:[]};
+ const failure=Object.assign(new Error('Incomplete research'),{kind:'incomplete',status:502});
+ await assert.rejects(runChatTools('research-image-mixed','Plan a trip to Tokyo and generate an image of it',new AbortController().signal,{planner:plan,research:async()=>{throw failure;}},context),error=>error===failure);
+ const abort=new AbortController(),reason=new Error('Cancelled by owner');
+ await assert.rejects(runChatTools('research-cancelled','Plan a trip to Tokyo',abort.signal,{planner:plan,research:async()=>{abort.abort(reason);throw reason;}},context),error=>error===reason);
+ const cap=process.env.MUSE_SEARCH_DAILY_REQUESTS;process.env.MUSE_SEARCH_DAILY_REQUESTS='0';
+ try{
+  await assert.rejects(runChatTools('research-quota','Plan a trip to Tokyo',new AbortController().signal,{planner:plan,research:()=>assert.fail('Daily quota must stop research')},context),error=>error.status===429);
+ }finally{if(cap===undefined)delete process.env.MUSE_SEARCH_DAILY_REQUESTS;else process.env.MUSE_SEARCH_DAILY_REQUESTS=cap;}
+});
+
 test('a Tokyo trip request on an empty board still produces a useful draft when tool planning is unavailable or truncated',async()=>{
  const original=globalThis.fetch;
  const message='can you help me make a trip to Tokyo for 2 people, me and my girlfriend';
