@@ -1,5 +1,5 @@
 import {expect,test} from '@playwright/test';
-import {museFixture,send} from './muse-fixture';
+import {chat,museFixture,send} from './muse-fixture';
 
 test('Muse size fits a wide workspace and remembers each owner’s choice separately',async({page})=>{
   await page.setViewportSize({width:2560,height:1440});
@@ -20,6 +20,8 @@ test('Muse size fits a wide workspace and remembers each owner’s choice separa
   await expect(muse).toHaveAttribute('data-muse-size','small');
   await muse.click();await setting.getByRole('button',{name:'Auto',exact:true}).click();await page.getByRole('button',{name:'Close Muse popup'}).click();
   await send(page,'Outline a new project');
+  await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await chat(page);
   await expect(page.locator('.muse-message.assistant')).toBeVisible();
   expect(await page.getByRole('textbox',{name:'Message Muse'}).evaluate(element=>parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
   await page.screenshot({path:'/tmp/muze-responsive-wide.png'});

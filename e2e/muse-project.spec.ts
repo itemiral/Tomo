@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { exported, museFixture, send } from './muse-fixture';
+import { chat, exported, museFixture, send } from './muse-fixture';
 
 type Packet = { message: string; board: string; project?: string; images?: { pageId: string; objectId: string; kind?: string; dataUrl: string }[] };
 const emptyActions = { cards: [], updates: [] };
@@ -165,6 +165,8 @@ test('streamed status labels progress without exposing thought text or applying 
   await expect(page.locator('.muze-vector-surface [id="streamed-card"]')).toHaveCount(0);
   await page.evaluate(() => (window as any).endMuseStream());
   await expect(page.locator('.muze-vector-surface [id="streamed-card"]')).toBeVisible();
-  await expect(page.getByText('Here is one next step.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
+  await chat(page);
+  await expect(page.getByText('Here is one next step.', { exact: true })).toBeVisible();
 });

@@ -105,7 +105,8 @@ test('Muse moves to its work, adds spaced editable notes, and returns to its res
   for (const [i, a] of plan.objects.entries()) for (const b of plan.objects.slice(i + 1)) expect(a.left + a.width <= b.left || b.left + b.width <= a.left || a.top + a.height <= b.top || b.top + b.height <= a.top).toBe(true);
   await expect(page.locator('.muse-floating')).not.toHaveClass(/working/);
   await page.screenshot({ path: 'verification/muze-collaboration.png' });
-  await page.getByRole('button', { name: 'Close Muse chat' }).click();
+  await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
   // Leave the character's hover area so its intentional hover pause can release.
   await page.mouse.move(1400,100);
   await expect(page.locator('.muse-floating')).not.toHaveClass(/working/, { timeout: 9000 });
@@ -137,6 +138,8 @@ test('follow-ups update the same plan and preserve edits made while Muse answers
   await page.mouse.dblclick(first.left * zoom + x + 70, first.top * zoom + y + 70);
   await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('My newer edit'); await page.keyboard.press('Escape');
   release();
+  await expect(page.getByRole('button', { name: 'Stop response', exact: true })).toHaveCount(0);
+  await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await chat(page);
   await expect(page.getByText('Kept 1 card you changed or locked.')).toBeVisible();
   const updated = await exported(page);
   expect(updated.objects).toHaveLength(3);
@@ -368,7 +371,7 @@ test('More stays anchored and preserves document drafts with keyboard and narrow
 
 test('generated notes use stable organic poses and honor explicit aligned layouts',async({page})=>{
  const fixture=await museFixture(page);await send(page,'Brainstorm a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);
- const first=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(first.some((o:{angle:number})=>Math.abs(o.angle)>0)).toBe(true);await page.getByRole('button',{name:'Close Muse chat'}).click();await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await exported(page)).objects).toHaveLength(0);await page.getByRole('button',{name:'Redo',exact:true}).click();const restored=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(restored.map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));await page.reload();expect(JSON.parse((await exported(page)).text).board.pages[0].objects.map((o:any)=>[o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.left,o.top,o.angle]));
+ const first=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(first.some((o:{angle:number})=>Math.abs(o.angle)>0)).toBe(true);await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await exported(page)).objects).toHaveLength(0);await page.getByRole('button',{name:'Redo',exact:true}).click();const restored=JSON.parse((await exported(page)).text).board.pages[0].objects;expect(restored.map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));await page.reload();expect(JSON.parse((await exported(page)).text).board.pages[0].objects.map((o:any)=>[o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.left,o.top,o.angle]));
  fixture.response(async()=>({cards:[{id:'aligned-a',title:'First',body:'A short note'},{id:'aligned-b',title:'Second',body:'Another short note'}],updates:[]}));await send(page,'Add two notes aligned in a grid');await expect.poll(async()=>JSON.parse((await exported(page)).text).board.pages[0].objects.length).toBe(5);const all=JSON.parse((await exported(page)).text).board.pages[0].objects;for(const o of all.filter((o:any)=>o.id.startsWith('aligned')))expect(o.angle).toBe(0);expect(all.filter((o:any)=>!o.id.startsWith('aligned')).map((o:any)=>[o.id,o.left,o.top,o.angle])).toEqual(first.map((o:any)=>[o.id,o.left,o.top,o.angle]));
 });
 
@@ -389,7 +392,7 @@ for(const width of [1440,390])test(`generated notes keep readable hierarchy abov
 });
 
 test('mobile entry frames existing page content once and preserves a deliberate pan',async({page})=>{
- await museFixture(page);await send(page,'Outline a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await museFixture(page);await send(page,'Outline a project');await expect(page.locator('.muze-vector-surface [id^="muse-test-"]')).toHaveCount(3);await expect(page.getByRole('button',{name:'Stop response',exact:true})).toHaveCount(0);await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/);
  await page.setViewportSize({width:390,height:844});
  const first=page.locator('.muze-vector-surface [id="muse-test-0"]');
  const openingVisible=async()=>{const box=await first.boundingBox(),composer=await page.locator('.muse-chat-stack').boundingBox();return !!box&&!!composer&&box.x>=8&&box.x+box.width<=(page.viewportSize()!.width-8)&&box.y>=70&&box.y+box.height<composer.y;};

@@ -1,5 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
-import {museFixture, send} from './muse-fixture';
+import {chat, museFixture, send} from './muse-fixture';
 
 async function cancellationFixture(page: Page) {
   await museFixture(page);
@@ -36,14 +36,16 @@ const counts = (page: Page) => page.evaluate(() => {
 });
 const progress = (page: Page, turn = 0) => page.evaluate(turn => (window as any).cancellationFixture.turns[turn].emit({type: 'progress', phase: 'context'}), turn);
 const releaseCancellation = (page: Page, index = 0) => page.evaluate(index => (window as any).cancellationFixture.cancellations[index].release(), index);
-async function finish(page: Page, turn: number) {
+async function finish(page: Page, turn: number, hasDraft = false) {
   await page.evaluate(turn => {
     const response = (window as any).cancellationFixture.turns[turn];
     response.emit({type: 'result', result: {messages: [{id: 'user-' + turn, role: 'user', content: response.request.message}, {id: 'answer-' + turn, role: 'assistant', content: 'Your next request was accepted.'}], actions: {cards: [], updates: []}}});
     response.finish();
   }, turn);
-  await expect(page.getByText('Your next request was accepted.', {exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Stop response', exact: true})).toHaveCount(0);
+  if (hasDraft) await expect(page.locator('.muse-chat')).not.toHaveClass(/collapsed/);
+  else { await expect(page.locator('.muse-chat')).toHaveClass(/collapsed/); await chat(page); }
+  await expect(page.getByText('Your next request was accepted.', {exact: true})).toBeVisible();
 }
 
 for (const width of [1440, 390]) test(`Stop then immediately send keeps the composer responsive at ${width}px`, async ({page}) => {
@@ -74,7 +76,7 @@ for (const width of [1440, 390]) test(`Stop then immediately send keeps the comp
   expect(state.cancelled).toBe(state.first);
   expect(state.aborted).toBe(true);
   expect(state.message).toBe('Actually, help with a shorter plan');
-  await finish(page, 1);
+  await finish(page, 1, true);
   await expect(input).toHaveValue('Keep this draft while the new answer arrives');
   await expect(page.locator('.muse-chat-error')).toHaveCount(0);
 });
