@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 const directory = await mkdtemp(join(tmpdir(), 'muze-chat-stream-'));
 const output = join(directory, 'chat.mjs');
 await build({ entryPoints: ['src/components/muse/chat-request.ts'], bundle: true, platform: 'node', format: 'esm', outfile: output, define: { 'process.env.NODE_ENV': '"test"' } });
-const { sendMuseChat } = await import(pathToFileURL(output));
+const { sendMuseChat, MuseStopError } = await import(pathToFileURL(output));
 const originalFetch = globalThis.fetch;
 after(async () => { globalThis.fetch = originalFetch; await rm(directory, { recursive: true, force: true }); });
 const signal = () => new AbortController().signal;
@@ -63,4 +63,79 @@ test('aborting the response propagates cancellation and never returns an earlier
   } }), { headers: { 'Content-Type': 'application/x-ndjson' } });
   const request = sendMuseChat({}, controller.signal, () => {}); controller.abort(reason);
   await assert.rejects(request, error => error === reason);
+});
+
+const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+const firstId='a64c57c3-610b-4ac5-a193-788abde6584d',nextId='baa1b698-b802-478a-9113-233e71cf34e0';
+const emptyResult={messages:[],actions:{cards:[],updates:[]}};
+function pendingStream(init,started){return new Response(new ReadableStream({start(controller){started(controller);init.signal.addEventListener('abort',()=>controller.error(init.signal.reason),{once:true});}}),{headers:{'Content-Type':'application/x-ndjson'}});}
+
+test('Stop releases the exact server request before a rapid next send starts',async()=>{
+ const abort=new AbortController(),cancelGate=deferred(),calls=[];let firstSignal;
+ globalThis.fetch=async(_url,init)=>{
+  const body=JSON.parse(init.body);calls.push({method:init.method,...body});
+  if(init.method==='DELETE'){await cancelGate.promise;return new Response('{}');}
+  if(body.requestId===firstId){firstSignal=init.signal;return pendingStream(init,stream=>stream.enqueue(encoder.encode('{"type":"progress","phase":"thinking"}\n')));}
+  return streaming([JSON.stringify({type:'result',result:emptyResult})+'\n']);
+ };
+ const first=sendMuseChat({requestId:firstId},abort.signal,()=>{});const rejected=assert.rejects(first,{name:'AbortError'});await tick();abort.abort();
+ const next=sendMuseChat({requestId:nextId},signal(),()=>{});await tick();
+ assert.deepEqual(calls.map(call=>[call.method,call.requestId]),[['POST',firstId],['DELETE',firstId]]);
+ assert.equal(firstSignal.aborted,false,'keep the transport until cancellation is acknowledged');
+ cancelGate.resolve();await rejected;assert.deepEqual(await next,emptyResult);
+ assert.equal(firstSignal.aborted,true);assert.equal(calls.at(-1).requestId,nextId);
+});
+
+test('Stop before first progress waits for acquisition without losing the acknowledgment reader',async()=>{
+ const abort=new AbortController(),calls=[];let firstStream;
+ globalThis.fetch=async(_url,init)=>{
+  const body=JSON.parse(init.body);calls.push({method:init.method,...body});
+  if(init.method==='DELETE')return new Response('{}');
+  if(body.requestId===firstId)return pendingStream(init,stream=>{firstStream=stream;});
+  return streaming([JSON.stringify({type:'result',result:emptyResult})]);
+ };
+ const first=sendMuseChat({requestId:firstId},abort.signal,()=>assert.fail('Stopped progress is not visible'));const rejected=assert.rejects(first,{name:'AbortError'});await tick();abort.abort();
+ const next=sendMuseChat({requestId:nextId},signal(),()=>{});await tick();assert.equal(calls.length,1);
+ firstStream.enqueue(encoder.encode('{"type":"progress","phase":"context"}\n'));
+ await rejected;assert.deepEqual(await next,emptyResult);
+ assert.deepEqual(calls.map(call=>[call.method,call.requestId]),[['POST',firstId],['DELETE',firstId],['POST',nextId]]);
+});
+
+test('an authentication failure before acknowledgment does not leave the next send waiting',async()=>{
+ const abort=new AbortController(),gate=deferred();let posts=0;
+ globalThis.fetch=async(_url,init)=>{
+  assert.equal(init.method,'POST');
+  if(++posts===1){await gate.promise;return new Response('{"error":"Sign in again."}',{status:401,headers:{'Content-Type':'application/json'}});}
+  return streaming([JSON.stringify({type:'result',result:emptyResult})]);
+ };
+ const first=sendMuseChat({requestId:firstId},abort.signal,()=>{});const rejected=assert.rejects(first);await tick();abort.abort();
+ const next=sendMuseChat({requestId:nextId},signal(),()=>{});gate.resolve();await rejected;assert.deepEqual(await next,emptyResult);assert.equal(posts,2);
+});
+
+test('failed cancellation is factual and a following send retries the same token before starting',async()=>{
+ const abort=new AbortController();let deletes=0,posts=0;
+ globalThis.fetch=async(_url,init)=>{
+  const body=JSON.parse(init.body);
+  if(init.method==='DELETE'){assert.equal(body.requestId,firstId);return new Response('{}',{status:++deletes===1?503:200});}
+  if(++posts===1)return pendingStream(init,stream=>stream.enqueue(encoder.encode('{"type":"progress","phase":"context"}\n')));
+  return streaming([JSON.stringify({type:'result',result:emptyResult})]);
+ };
+ const first=sendMuseChat({requestId:firstId},abort.signal,()=>{});const rejected=assert.rejects(first,error=>error instanceof MuseStopError);await tick();abort.abort();await rejected;
+ assert.equal(posts,1);assert.equal(deletes,1);
+ assert.deepEqual(await sendMuseChat({requestId:nextId},signal(),()=>{}),emptyResult);assert.equal(deletes,2);assert.equal(posts,2);
+});
+
+test('a missing acknowledgment has a bounded failure and still cancels safely when it eventually arrives',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const abort=new AbortController(),calls=[];let firstStream;
+ globalThis.fetch=async(_url,init)=>{
+  calls.push(init.method);
+  if(init.method==='DELETE')return new Response('{}');
+  return pendingStream(init,stream=>{firstStream=stream;});
+ };
+ const first=sendMuseChat({requestId:firstId},abort.signal,()=>{});const rejected=assert.rejects(first,error=>error instanceof MuseStopError);await tick();abort.abort();
+ await tick();t.mock.timers.tick(8001);await rejected;assert.deepEqual(calls,['POST']);
+ firstStream.enqueue(encoder.encode('{"type":"progress","phase":"context"}\n'));await tick();assert.deepEqual(calls,['POST','DELETE']);
+ t.mock.timers.reset();
 });

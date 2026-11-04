@@ -1,7 +1,7 @@
 import 'server-only';
 import {runChatTools} from '../../../scripts/muse-chat-tools.mjs';
 import { museCanvasContext } from '../../../scripts/muse-canvas.mjs';
-import { withMuseLease } from '../../../scripts/muse-storage.mjs';
+import { withMuseLease, hasMuseLease, cancelMuseLease } from '../../../scripts/muse-storage.mjs';
 import { readMuseLearning, readMuseArchive, commitMuseTurn } from '../../../scripts/muse-learning.mjs';
 import { buildMuseContext, MuseContextError } from './context';
 import { parseMuseProjectContext } from '@/lib/muse-project';
@@ -16,9 +16,21 @@ import { PrivateError } from './error';
 import { museResponseSchema, parseBoardContext, parseMuseResponse } from '@/lib/muse-board';
 
 export type MuseMessage = { id: string; role: 'user' | 'assistant'; content: string };
-const pending = new Set<string>();
+const pending = new Map<string, {id: string; abort: AbortController; acquired: boolean}>();
+const requestIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const completionTokens = 6144;
 const responseSchema = { ...museResponseSchema, properties: { ...museResponseSchema.properties, personalization: personalizationSchema }, required: [...museResponseSchema.required, 'personalization'] };
+
+export async function cancelMuseChat(ownerId: string, requestId: unknown) {
+  if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) throw new PrivateError(400, 'Choose the response to stop.');
+  // Release the durable fence first, including when cancellation reaches a different worker.
+  await cancelMuseLease(ownerId, 'chat', requestId);
+  const current = pending.get(ownerId);
+  if (current?.id === requestId) {
+    current.abort.abort(new DOMException('Request cancelled.', 'AbortError'));
+    if (pending.get(ownerId) === current) pending.delete(ownerId);
+  }
+}
 
 export async function askMuse(ownerId: string, body: Record<string, unknown>, signal: AbortSignal, effort:'low'|'medium'='low', onProgress?: (phase: MuseProgress) => void) {
   const thread = validThread(body.thread);
@@ -38,9 +50,19 @@ export async function askMuse(ownerId: string, body: Record<string, unknown>, si
   const progress = (phase: MuseProgress) => { signal.throwIfAborted(); onProgress?.(phase); };
   const apiKey = process.env.MODEL_API_KEY;
   if (!apiKey) throw new PrivateError(503, 'Muse is not configured yet.');
+  if (body.requestId !== undefined && (typeof body.requestId !== 'string' || !requestIdPattern.test(body.requestId))) throw new PrivateError(400, 'Invalid response request.');
+  const previous = pending.get(ownerId);
+  if (previous?.acquired && !await hasMuseLease(ownerId, 'chat', previous.id)) {
+    previous.abort.abort(new DOMException('Request cancelled.', 'AbortError'));
+    if (pending.get(ownerId) === previous) pending.delete(ownerId);
+  }
   if (pending.has(ownerId)) throw new PrivateError(409, 'Muse is still answering. Try again in a moment.');
-  pending.add(ownerId);
-  try { return await withMuseLease(ownerId, 'chat', async () => {
+  const current = {id: typeof body.requestId === 'string' ? body.requestId : randomUUID(), abort: new AbortController(), acquired: false};
+  pending.set(ownerId, current);
+  signal = AbortSignal.any([signal, current.abort.signal]);
+  try { return await withMuseLease(ownerId, 'chat', async (leaseSignal: AbortSignal) => {
+    signal = leaseSignal;
+    current.acquired = true;
     progress('context');
     let images;
     try {
@@ -126,10 +148,11 @@ export async function askMuse(ownerId: string, body: Record<string, unknown>, si
     const messages: MuseMessage[] = [...history, userMessage, { id: turnId, role: 'assistant', content: plan.reply }];
     progress('saving');
     const saved = await commitMuseTurn(ownerId, thread, { messages, personalization, snapshot: learning, userMessage, boardName: board.board });
+    signal.throwIfAborted();
     status.outcome = 'complete';
     return { messages: saved.messages, actions: plan.actions, suggestions: plan.suggestions, personalizationUpdated: saved.learningChanged };
-  }); } finally {
-    pending.delete(ownerId);
+  }, {token: current.id, signal}); } finally {
+    if (pending.get(ownerId) === current) pending.delete(ownerId);
     recordMuseMetrics({measurement, usage, durationMs: performance.now() - started, inferenceMs, images: imageCount, objects: context?.board.objects.length, pages: context?.project?.pages.length, excerpts: context?.project?.excerpts.length, omittedObjects: context?.omitted.objects, omittedHistory: context?.omitted.history, omittedExcerpts: context?.omitted.projectExcerpts, outcome: signal.aborted && status.outcome !== 'complete' ? 'cancelled' : status.outcome});
   }
 }

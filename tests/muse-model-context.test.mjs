@@ -16,7 +16,7 @@ const bundle=await build({entryPoints:['src/server/muse/model.ts'],bundle:true,w
  b.onResolve({filter:/^sharp$/},()=>({path:require.resolve('sharp'),external:true}));
  b.onResolve({filter:/\.mjs$/},args=>({path:resolve(args.resolveDir,args.path),external:true}));
 }}]});await writeFile(join(dir,'model.mjs'),bundle.outputFiles[0].text);
-const {askMuse}=await import(pathToFileURL(join(dir,'model.mjs')));
+const {askMuse,cancelMuseChat}=await import(pathToFileURL(join(dir,'model.mjs')));
 const {readMuseChat}=await import('../scripts/muse-store.mjs');
 after(()=>rm(dir,{recursive:true,force:true}));
 const note=(id,text)=>({id,type:'MuzeNote',text,left:10,top:10,width:280,height:160});
@@ -96,4 +96,28 @@ test('cancelling the token count preserves chat and releases the owner lease',as
   assert.deepEqual(await readMuseChat('cancel-count-owner','project:active'),[]);
  });
  await mocked(async url=>url.endsWith('/input_tokens')?count(1000):reply(),()=>askMuse('cancel-count-owner',body(),new AbortController().signal));
+});
+
+test('explicit Stop releases only its request and a late response cannot save or unlock the replacement',async()=>{
+ const owner='cancel-replace-owner',firstId='9c0ec399-2d63-4f26-a06e-99d1dc169662',secondId='f431d696-b94d-4d75-959c-7ebc28c42f3e';
+ const gate=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
+ const arrived=[gate(),gate()],released=[gate(),gate()];let completions=0;
+ await mocked(async url=>{
+  if(url.endsWith('/input_tokens'))return count(1000);
+  const index=completions++;arrived[index].resolve();await released[index].promise;
+  // Deliberately ignore AbortSignal, as an already-running remote worker can.
+  return reply();
+ },async()=>{
+  const first=askMuse(owner,{...body(),requestId:firstId},new AbortController().signal);const rejected=assert.rejects(first,error=>error.status===499||error.name==='AbortError');await arrived[0].promise;
+  await cancelMuseChat('another-owner',firstId);await cancelMuseChat(owner,secondId);
+  await assert.rejects(askMuse(owner,body(),new AbortController().signal),{status:409});
+  await cancelMuseChat(owner,firstId);
+  const second=askMuse(owner,{...body(),requestId:secondId},new AbortController().signal);await arrived[1].promise;
+  released[0].resolve();await rejected;
+  assert.deepEqual(await readMuseChat(owner,'project:active'),[],'cancelled result must not enter history');
+  await assert.rejects(askMuse(owner,body(),new AbortController().signal),{status:409},'old finally must not unlock the replacement');
+  released[1].resolve();await second;
+  assert.equal((await readMuseChat(owner,'project:active')).length,2);
+ });
+ await assert.rejects(cancelMuseChat(owner,'not-a-request-id'),{status:400});
 });
