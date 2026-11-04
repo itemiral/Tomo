@@ -129,12 +129,13 @@ test('board members see named cursors at world positions across pan and zoom', a
   } finally { await a.close(); await b.close(); }
 });
 
-test('late joiners see stationary cursors and keepalives preserve them until the pointer leaves',async({browser})=>{
+test('late joiners see stationary cursors through window switches until the member leaves',async({browser})=>{
  const bus=transport(),a=await browser.newContext(),b=await browser.newContext();
  try{
   const ada=await a.newPage(),bo=await b.newPage();
   await ada.clock.install();await bo.clock.install();
   await fixture(ada,bus,'ada');await expect(ada.getByLabel('People on this board')).toContainText('You');await ada.mouse.move(500,350);
+  await ada.evaluate(()=>{window.dispatchEvent(new PointerEvent('pointerout',{relatedTarget:null}));window.dispatchEvent(new Event('blur'));Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
   await fixture(bo,bus,'bo');await expect(bo.getByLabel('People on this board')).toContainText('Ada');
   await ada.clock.runFor(3100);const cursor=bo.getByLabel('Ada’s cursor',{exact:true});await expect(cursor).toBeVisible();
   // A connected peer keeps its last position even when no cursor heartbeat arrives.
@@ -142,10 +143,12 @@ test('late joiners see stationary cursors and keepalives preserve them until the
   await bo.clock.runFor(16000);await expect(cursor).toBeVisible();
   expect(bus.messages.filter(message=>message.operation==='broadcast'&&message.event==='cursor')).toHaveLength(cursorMessages);
   for(let interval=0;interval<5;interval++){await ada.clock.runFor(3000);await bo.clock.runFor(3000);await expect(cursor).toBeVisible();}
+  await ada.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
   await ada.getByRole('button',{name:'Pan and zoom',exact:true}).focus();await ada.keyboard.press('Enter');await ada.clock.runFor(3100);
   await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(840);await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(620);
-  await ada.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerout',{relatedTarget:null})));await expect(cursor).toHaveCount(0);
-  await ada.clock.runFor(12000);await expect(cursor).toHaveCount(0);
+  await ada.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerout',{relatedTarget:null})));await expect(cursor).toBeVisible();
+  await ada.clock.runFor(12000);await expect(cursor).toBeVisible();
+  await ada.getByRole('button',{name:'Leave board',exact:true}).click();await expect(cursor).toHaveCount(0);
  }finally{await a.close();await b.close();}
 });
 
@@ -172,9 +175,9 @@ test('cursor positions include chat and toolbar controls without blocking their 
   await ada.mouse.move(toolbar!.x+8,toolbar!.y+8);await ada.clock.runFor(100);
   await expect.poll(async()=>Math.round((await cursor.boundingBox())!.x)).toBe(Math.round(toolbar!.x+8));
   await expect.poll(async()=>Math.round((await cursor.boundingBox())!.y)).toBe(Math.round(toolbar!.y+8));
-  // Hiding the tab clears the pointer immediately, without a delayed timer or presence update.
+  // Switching tabs keeps the last position, without adding presence writes.
   await ada.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});
-  await expect(cursor).toHaveCount(0);
+  await expect(cursor).toBeVisible();
   expect(bus.messages.filter(message=>message.operation==='track')).toHaveLength(tracks);
   expect(bus.messages.filter(message=>message.operation==='untrack')).toHaveLength(0);
  }finally{await a.close();await b.close();}

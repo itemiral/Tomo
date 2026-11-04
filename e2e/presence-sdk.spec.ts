@@ -78,7 +78,7 @@ function bundle() {
       import{BoardParticipants,BoardPeerCursors}from'./src/components/muze/board-presence';
       import'./src/app/globals.css';import'./src/components/muze/whiteboard.css';
       function App(){const[options,setOptions]=useState({pageId:'page-one',museWorking:false,enabled:true,viewport:[1,0,0,1,0,0]});window.sdkSetOptions=patch=>setOptions(value=>({...value,...patch}));window.sdkOptions=options;
-        const state=useBoardPresence({...options,boardId:'${boardId}',userId:window.sdkActor,name:window.sdkActor==='owner'?'Ada':'Bo'});window.sdkPresence=state;
+        const state=useBoardPresence({...options,boardId:'${boardId}',userId:window.sdkActor,name:window.sdkActor==='owner'?'Ada':window.sdkActor==='guest'?'Bo':'Anel'});window.sdkPresence=state;
         return <main className="muze-app"><div className="muze-drawing-surface" style={{position:'fixed',inset:0}}/><BoardParticipants peers={state.peers} userId={window.sdkActor} connected={state.connected}/><BoardPeerCursors cursors={state.cursors} pageId={options.pageId} viewport={options.viewport}/></main>;
       }createRoot(document.getElementById('root')).render(<App/>);
     ` },
@@ -95,7 +95,7 @@ function bundle() {
   }).then(result => ({ js: result.outputFiles.find(file => file.path.endsWith('.js'))!.text, css: result.outputFiles.find(file => file.path.endsWith('.css'))!.text }));
 }
 
-async function fixture(browser: Browser, server: ReturnType<typeof protocolServer>, actor: 'owner' | 'guest') {
+async function fixture(browser: Browser, server: ReturnType<typeof protocolServer>, actor: 'owner' | 'guest' | 'guest-two') {
   const context = await browser.newContext(), page = await context.newPage(), assets = await bundle();
   await page.clock.install({ time: new Date('2026-11-01T12:00:00Z') });
   await page.addInitScript(actor => { (window as any).sdkActor = actor; }, actor);
@@ -112,21 +112,98 @@ async function options(page: Page, patch: { pageId?: string; museWorking?: boole
 }
 const tracks = (server: ReturnType<typeof protocolServer>, actor = 'owner') => server.packets.filter(packet => packet.actor === actor && packet.event === 'presence');
 
-test('real SDK delivers owner and invited editor cursors in both directions', async ({ browser }) => {
+test('real SDK delivers cursors between the owner and two invited editors in every direction', async ({ browser }) => {
   const server = protocolServer(), contexts: BrowserContext[] = [];
   try {
     const owner = await fixture(browser, server, 'owner'); contexts.push(owner.context);
     const guest = await fixture(browser, server, 'guest'); contexts.push(guest.context);
+    const anotherGuest = await fixture(browser, server, 'guest-two'); contexts.push(anotherGuest.context);
     await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
     await expect(owner.page.getByLabel('People on this board')).toContainText('Bo');
     await owner.page.mouse.move(450, 350); await expect(guest.page.getByLabel('Ada’s cursor', { exact: true })).toBeVisible();
     await guest.page.mouse.move(600, 400); await expect(owner.page.getByLabel('Bo’s cursor', { exact: true })).toBeVisible();
+    await anotherGuest.page.mouse.move(550, 450);
+    for (const [viewer, names] of [[owner.page, ['Bo', 'Anel']], [guest.page, ['Ada', 'Anel']], [anotherGuest.page, ['Ada', 'Bo']]] as const) {
+      for (const name of names) await expect(viewer.getByLabel(name + '’s cursor', { exact: true })).toBeVisible();
+      await expect(viewer.locator('.board-peer-cursor')).toHaveCount(2);
+    }
     const joins = server.packets.filter(packet => packet.event === 'phx_join').length;
     await owner.page.evaluate(() => { for (let i = 0; i < 8; i++) window.dispatchEvent(new Event('sdk-session-resource')); });
     await owner.page.mouse.move(480, 370);
     await expect.poll(() => guest.page.evaluate(() => (window as any).sdkPresence.cursors.find((cursor: any) => cursor.userId === 'owner')?.x)).toBe(480);
     expect(server.packets.filter(packet => packet.event === 'phx_join')).toHaveLength(joins);
     expect(server.failures).toEqual([]);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+test('an idle second tab cannot replace the collaborator’s active cursor with heartbeat replays', async ({ browser }) => {
+  const server = protocolServer(), contexts: BrowserContext[] = [];
+  try {
+    const owner = await fixture(browser, server, 'owner'); contexts.push(owner.context);
+    const idle = await fixture(browser, server, 'guest'); contexts.push(idle.context);
+    const active = await fixture(browser, server, 'guest'); contexts.push(active.context);
+    await expect.poll(() => owner.page.evaluate(() => (window as any).sdkPresence.peers.filter((peer: any) => peer.userId === 'guest').length)).toBe(2);
+    const cursor = owner.page.getByLabel('Bo’s cursor', { exact: true });
+    await idle.page.mouse.move(400, 300);
+    await expect(cursor).toBeVisible();
+    await server.advance([owner.page, idle.page, active.page], 500);
+    await active.page.mouse.move(650, 420);
+    await expect.poll(async () => Math.round((await cursor.boundingBox())!.x)).toBe(650);
+    // Keep the receiver's clock ahead so a stale heartbeat would win by arrival time.
+    await server.advance([owner.page], 3000);
+    await server.advance([idle.page], 3000);
+    await expect.poll(() => server.packets.filter(packet => packet.event === 'broadcast' && packet.action === 'cursor' && packet.payload?.x === 400).length).toBeGreaterThan(1);
+    await expect(cursor).toHaveCount(1);
+    expect(Math.round((await cursor.boundingBox())!.x)).toBe(650);
+    await idle.page.mouse.move(430, 320);
+    await server.advance([owner.page, idle.page], 150);
+    await expect.poll(async () => Math.round((await cursor.boundingBox())!.x)).toBe(430);
+    expect(server.failures).toEqual([]);
+  } finally { await Promise.all(contexts.map(context => context.close())); }
+});
+
+test('the owner sees an invited editor’s stationary cursor after window switches and reconnects', async ({ browser }) => {
+  const server = protocolServer(), contexts: BrowserContext[] = [];
+  try {
+    const owner = await fixture(browser, server, 'owner'); contexts.push(owner.context);
+    const guest = await fixture(browser, server, 'guest'); contexts.push(guest.context);
+    await expect(owner.page.getByLabel('People on this board')).toContainText('Bo');
+    await expect(guest.page.getByLabel('People on this board')).toContainText('Ada');
+    await owner.page.mouse.move(450, 350);
+    await guest.page.mouse.move(600, 400);
+    const guestCursor = owner.page.getByLabel('Bo’s cursor', { exact: true });
+    await expect(guestCursor).toBeVisible();
+    await expect(guest.page.getByLabel('Ada’s cursor', { exact: true })).toBeVisible();
+
+    await guest.page.evaluate(() => {
+      window.dispatchEvent(new PointerEvent('pointerout', { relatedTarget: null }));
+      window.dispatchEvent(new Event('blur'));
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await server.advance([owner.page, guest.page], 5000);
+    await expect(guestCursor).toBeVisible();
+    expect(await owner.page.evaluate(() => (window as any).sdkPresence.cursors.find((cursor: any) => cursor.userId === 'guest'))).toMatchObject({ x: 600, y: 400 });
+
+    // A returning receiver must get the last position from a hidden sender.
+    server.close('owner');
+    await expect(guestCursor).toHaveCount(0);
+    await server.advance([owner.page, guest.page], 12000);
+    await expect(owner.page.getByLabel('People on this board')).toContainText('Bo');
+    await expect(guestCursor).toBeVisible();
+    expect(await owner.page.evaluate(() => (window as any).sdkPresence.cursors.find((cursor: any) => cursor.userId === 'guest'))).toMatchObject({ x: 600, y: 400 });
+
+    await guest.page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await guest.page.mouse.move(640, 420);
+    await server.advance([owner.page, guest.page], 150);
+    await expect.poll(() => owner.page.evaluate(() => (window as any).sdkPresence.cursors.find((cursor: any) => cursor.userId === 'guest')?.x)).toBe(640);
+    expect(server.failures).toEqual([]);
+    await guest.context.close(); contexts.pop();
+    await expect(guestCursor).toHaveCount(0);
   } finally { await Promise.all(contexts.map(context => context.close())); }
 });
 

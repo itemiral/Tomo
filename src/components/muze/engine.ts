@@ -47,6 +47,7 @@ export class WhiteboardEngine {
   private future: string[] = [];
   private loading = true;
   private loadVersion = 0;
+  private pendingMuseImages = new Set<AbortController>();
   private start: Point | null = null;
   private drawing: FabricObject | null = null;
   private pan: { x: number; y: number } | null = null;
@@ -174,6 +175,7 @@ export class WhiteboardEngine {
     window.addEventListener('paste', paste); this.disposers.push(() => window.removeEventListener('paste', paste));
   }
   async load(drawing: Drawing) {
+    this.cancelMuseImages();
     this.loadVersion++;
     this.loadingDrawing = drawing;
     this.loading = true;
@@ -327,6 +329,7 @@ export class WhiteboardEngine {
     const collect = (objects: Record<string, unknown>[]) => { for (const object of objects) { if (typeof object.id === 'string') ids.add(object.id); if (Array.isArray(object.objects)) collect(object.objects); } };
     collect(candidate.objects || []);
     if (this.sceneObjects().some(object => this.protectedId(object.id) && !ids.has(object.id!))) { this.warnProtected(); return; }
+    this.cancelMuseImages();
     this.loading = true; this.canvas.discardActiveObject();
     if (redo) this.history.push(this.future.pop()!); else this.future.push(this.history.pop()!);
     await this.canvas.loadFromJSON(this.history.at(-1)!);
@@ -346,7 +349,7 @@ export class WhiteboardEngine {
     const brush = new PencilBrush(c); brush.color = this.paint.color; brush.width = tool === 'highlight' ? this.paint.size * 5 + 8 : this.paint.size; brush.decimate = .25;
     c.freeDrawingBrush = brush; c.requestRenderAll(); this.emit();
   }
-  private options() { const p = this.paint; return { id: crypto.randomUUID(), fill: p.fill === 'none' ? 'transparent' : p.fill === 'soft' || p.fill === 'pattern' ? pale(p.color, .18) : p.color, stroke: p.color, strokeWidth: p.size, muzeDash: p.dash, muzeFill: p.fill, strokeDashArray: p.dash === 'dashed' ? [p.size * 3, p.size * 2] : p.dash === 'dotted' ? [.1, p.size * 2.5] : undefined, strokeLineCap: 'round' as const, strokeLineJoin: 'round' as const, opacity: p.opacity, objectCaching: false, fontFamily: p.font, fontSize: SIZES.find(s => s.stroke === p.size)?.label || 22, textAlign: 'center' }; }
+  private options() { const p = this.paint; return { id: crypto.randomUUID(), fill: p.fill === 'none' ? 'transparent' : p.fill === 'soft' || p.fill === 'pattern' ? pale(p.color, .18) : p.color, stroke: p.color, strokeWidth: p.size, muzeDash: p.dash, muzeFill: p.fill, strokeDashArray: p.dash === 'dashed' ? [p.size * 3, p.size * 2] : p.dash === 'dotted' ? [.1, p.size * 2.5] : null, strokeLineCap: 'round' as const, strokeLineJoin: 'round' as const, opacity: p.opacity, objectCaching: false, fontFamily: p.font, fontSize: SIZES.find(s => s.stroke === p.size)?.label || 22, textAlign: 'center' }; }
   private target(point: Point) { return this.canvas.getObjects().slice().reverse().find(o => !(o instanceof Line) && !o.labelFor && o.muzeKind !== 'frame' && o.containsPoint(point)); }
   toggleToolLock() { this.locked = !this.locked; this.emit(); }
   toggleSnap() { this.snap = !this.snap; this.emit(); }
@@ -365,7 +368,7 @@ export class WhiteboardEngine {
     switch (this.tool) {
       case 'arrow': this.drawing = new MuzeArrow([point.x, point.y, point.x + 1, point.y + 1], { ...this.options(), muzeKind: 'arrow', arrowStart: this.paint.arrowStart, arrowEnd: this.paint.arrowEnd, startBinding: this.target(point)?.id }); break;
       case 'line': this.drawing = new Line([point.x, point.y, point.x + 1, point.y + 1], { ...this.options(), muzeKind: 'line' }); break;
-      case 'frame': this.drawing = new Rect({ ...base, stroke: '#a1a8b2', strokeWidth: 1, fill: 'transparent', strokeDashArray: undefined }); break;
+      case 'frame': this.drawing = new Rect({ ...base, stroke: '#a1a8b2', strokeWidth: 1, fill: 'transparent', strokeDashArray: null }); break;
       default: this.drawing = new MuzeShape(base);
     }
     this.canvas.add(this.drawing);
@@ -493,9 +496,24 @@ export class WhiteboardEngine {
     if (object.group) delta = delta.transform(util.invertTransform(object.group.calcTransformMatrix()), true);
     object.set({ left: object.left + delta.x, top: object.top + delta.y }); object.setCoords();
   }
-  applyMuseActions(actions: MuseActions): MuseApplyResult {
-    if (this.closed || this.loading || !this.enabled) return { ids: [], skipped: actions.cards.length + actions.updates.length+(actions.images?.length||0) };
-    for(const image of actions.images||[])void this.addRemoteImage(image);
+  async applyMuseActions(actions: MuseActions, signal?: AbortSignal): Promise<MuseApplyResult> {
+    signal?.throwIfAborted();
+    const skippedResult = { ids: [], skipped: actions.cards.length + actions.updates.length + (actions.images?.length || 0) };
+    if (this.closed || this.loading || !this.enabled) {
+      if (actions.images?.length) throw new Error('The board is not ready to place this image.');
+      return skippedResult;
+    }
+    const version = this.loadVersion;
+    // Decode every image before touching notes, so a failed image leaves the
+    // whole response unapplied and the saved result can be placed again.
+    const prepared = await this.prepareMuseImages(actions.images || [], signal);
+    const discard = () => prepared.forEach(({image}) => image.dispose());
+    if (signal?.aborted) { discard(); signal.throwIfAborted(); }
+    if (version !== this.loadVersion || this.closed || this.loading || !this.enabled) {
+      discard();
+      if (actions.images?.length) throw new Error('The board changed before Muse could apply this result.');
+      return skippedResult;
+    }
     const c = this.canvas, changed: FabricObject[] = [], focus = new Set(actions.focusIds || []);
     let skipped = 0;
     // Keep any newer text or active edits made while Muse was answering.
@@ -530,10 +548,17 @@ export class WhiteboardEngine {
       const bounds=object.getBoundingRect();boxes.push(bounds);
       c.add(object); changed.push(object); rowHeight = Math.max(rowHeight, bounds.top+bounds.height-top); index++;
     }
+    let imagesAdded = 0;
+    for (const {image, item} of prepared) {
+      if (this.sceneObjects().some(object => object.id === item.id)) { image.dispose(); continue; }
+      image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(box=>box.left+box.width))+48:center.x,top:focusBoxes.length?Math.min(...focusBoxes.map(box=>box.top)):center.y-160,sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt,imageUrl:item.imageUrl,attribution:item.attribution});
+      image.scale(Math.min(1,420/image.width,320/image.height));image.setCoords();this.placeWithoutOverlap(image,boxes);
+      boxes.push(image.getBoundingRect());c.add(image);changed.push(image);imagesAdded++;
+    }
     if (changed.length) {
       const selection = c.getActiveObject(); if (selection instanceof ActiveSelection) { selection.triggerLayout(); selection.setCoords(); }
       this.assignFrames(); this.connectors(); this.checkpoint();
-      if (index) this.scheduleFrame([...focusObjects, ...changed], true);
+      if (index || imagesAdded) this.scheduleFrame([...focusObjects, ...changed], true);
     }
     return { ids: changed.map(object => object.id!), skipped };
   }
@@ -601,7 +626,7 @@ export class WhiteboardEngine {
         if (patch.fill && !(item instanceof IText)) item.set({ muzeFill: patch.fill, fill: patch.fill === 'none' ? 'transparent' : patch.fill === 'solid' ? this.paint.color : pale(this.paint.color, .18) });
         if (patch.size && !(item instanceof IText)) item.set({ strokeWidth: patch.size });
         if (patch.opacity !== undefined) item.set({ opacity: patch.opacity });
-        if (patch.dash) item.set({ muzeDash: patch.dash, strokeDashArray: patch.dash === 'dashed' ? [this.paint.size * 3, this.paint.size * 2] : patch.dash === 'dotted' ? [.1, this.paint.size * 2.5] : undefined });
+        if (patch.dash) item.set({ muzeDash: patch.dash, strokeDashArray: patch.dash === 'dashed' ? [this.paint.size * 3, this.paint.size * 2] : patch.dash === 'dotted' ? [.1, this.paint.size * 2.5] : null });
         if (patch.arrowStart) item.set('arrowStart', patch.arrowStart);
         if (patch.arrowEnd) item.set('arrowEnd', patch.arrowEnd);
         const labels = item instanceof IText ? [item] : this.canvas.getObjects().filter(o => o.labelFor === item.id) as IText[];
@@ -701,13 +726,20 @@ export class WhiteboardEngine {
     const app = this.canvas.upperCanvasEl.closest('.muze-app');
     const visibleBounds = (selector: string) => [...(app?.querySelectorAll<HTMLElement>(selector) || [])].map(element => element.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
     const header = visibleBounds('.muze-header'), composer = visibleBounds('.muse-chat-stack'), toolbar = visibleBounds('.muze-toolbar-dock');
+    const muse = readable && this.canvas.width <= 700 ? app?.querySelector<HTMLElement>('.muse-floating') : undefined;
     const area = usableCanvasArea(this.canvas.width, this.canvas.height, {
-      headerBottom: header.length ? Math.max(...header.map(rect => rect.bottom)) : undefined,
+      headerBottom: Math.max(header.length ? Math.max(...header.map(rect => rect.bottom)) : 64, muse?.offsetHeight ? 60 + muse.offsetHeight + 4 : 0),
       composerTop: composer.length ? Math.min(...composer.map(rect => rect.top)) : undefined,
       toolbarTop: toolbar.length ? Math.min(...toolbar.map(rect => rect.top)) : undefined,
     });
     const visible = objects.filter(object => !object.labelFor), content = visible.filter(object => object.muzeKind !== 'frame');
-    const viewport = frameCanvasBoxes((readable && content.length ? content : visible).map(object => object.getBoundingRect()), area, readable, maxZoom);
+    const framed = readable && content.length ? content : visible, boxes = framed.map(object => object.getBoundingRect());
+    const complete = frameCanvasBoxes(boxes, area, false, maxZoom);
+    // A compact plan can fit above a taller chat while keeping its text legible.
+    // Use the first-section view only when fitting everything makes text small.
+    const text = this.sceneObjects(framed).filter((object):object is IText=>object instanceof IText);
+    const completeReadable = complete && text.every(object=>object.fontSize*Math.min(Math.abs(object.getObjectScaling().x),Math.abs(object.getObjectScaling().y))*complete[0]>=13);
+    const viewport = readable && !completeReadable ? frameCanvasBoxes(boxes, area, true, maxZoom) : complete;
     if (viewport) { this.canvas.setViewportTransform(viewport); this.publish(); }
   }
   private scheduleFrame(objects: FabricObject[], readable: boolean) {
@@ -824,13 +856,41 @@ export class WhiteboardEngine {
     this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.checkpoint();
   }
   clearSelection(){this.canvas.discardActiveObject();this.canvas.requestRenderAll();this.emit();}
+  private cancelMuseImages() {
+    for (const controller of this.pendingMuseImages) controller.abort(new Error('The board changed before Muse could apply this result.'));
+    this.pendingMuseImages.clear();
+  }
+  private async prepareMuseImages(items:NonNullable<MuseActions['images']>, signal?:AbortSignal) {
+    const prepared:{image:FabricImage;item:NonNullable<MuseActions['images']>[number]}[]=[];
+    if (!items.length) return prepared;
+    const controller=new AbortController(), cancel=()=>controller.abort(signal?.reason);
+    if (signal?.aborted) signal.throwIfAborted();
+    signal?.addEventListener('abort',cancel,{once:true});this.pendingMuseImages.add(controller);
+    const timer=setTimeout(()=>controller.abort(new Error('The image took too long to open.')),15000);
+    const ids=new Set(this.sceneObjects().map(object=>object.id));
+    try {
+      for (const item of items) {
+        controller.signal.throwIfAborted();
+        if (ids.has(item.id)) continue;
+        if (typeof item.src!=='string'||item.src.length>16000000||!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(item.src)) throw new Error('The image format is not supported.');
+        const image=await FabricImage.fromURL(item.src,{signal:controller.signal});
+        prepared.push({image,item});controller.signal.throwIfAborted();
+        if (![image.width,image.height].every(value=>Number.isFinite(value)&&value>0)) throw new Error('The image could not be opened.');
+        ids.add(item.id);
+      }
+      return prepared;
+    } catch (error) {
+      prepared.forEach(({image})=>image.dispose());
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (error instanceof Error&&['The image format is not supported.','The image could not be opened.'].includes(error.message)) throw error;
+      throw new Error('The image could not be opened.');
+    } finally {clearTimeout(timer);signal?.removeEventListener('abort',cancel);this.pendingMuseImages.delete(controller);}
+  }
   async addRemoteImage(item:NonNullable<MuseActions['images']>[number]) {
-    if(!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(item.src)||item.src.length>16000000)return;
-    const canvas=this.canvas,version=this.loadVersion;
-    try{const image=await FabricImage.fromURL(item.src);if(version!==this.loadVersion||this.closed||this.loading||!this.enabled||canvas.getObjects().some(o=>o.id===item.id))return;
-      const center=this.center(),boxes=canvas.getObjects().map(o=>o.getBoundingRect());
-      image.set({id:item.id,left:boxes.length?Math.max(...boxes.map(b=>b.left+b.width))+48:center.x,top:center.y-160,...{sourceUrl:item.sourceUrl,sourceTitle:item.sourceTitle,retrievedAt:item.retrievedAt,imageUrl:item.imageUrl,attribution:item.attribution}});image.scale(Math.min(1,420/image.width,320/image.height));canvas.add(image);this.setTool('select');canvas.setActiveObject(image);this.checkpoint();this.fit(true);
-    }catch{this.report('The image could not be placed.');}
+    const result=await this.applyMuseActions({cards:[],updates:[],images:[item]});
+    const image=result.ids.includes(item.id)?this.canvas.getObjects().find(object=>object.id===item.id):undefined;
+    if(image){this.setTool('select');this.canvas.setActiveObject(image);this.fit(true);}
+    return result;
   }
   async addImage(file: File, canApply:()=>boolean=()=>true) {
     const version=this.loadVersion;
@@ -867,6 +927,7 @@ export class WhiteboardEngine {
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
     if (!enabled) {
+      this.cancelMuseImages();
       const active = this.canvas.getActiveObject();
       if (active instanceof IText && active.isEditing) active.exitEditing();
       this.space = false;
@@ -908,5 +969,5 @@ export class WhiteboardEngine {
       active.set({ left: active.left + (key === 'arrowleft' ? -delta : key === 'arrowright' ? delta : 0), top: active.top + (key === 'arrowup' ? -delta : key === 'arrowdown' ? delta : 0) }); active.setCoords(); this.moveFrame(active); this.syncLabels(); this.connectors(); this.checkpoint();
     }
   }
-  dispose() { this.closed = true; if (this.sharedTimer) clearTimeout(this.sharedTimer); this.pendingShared = undefined; if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
+  dispose() { this.closed = true; this.cancelMuseImages(); if (this.sharedTimer) clearTimeout(this.sharedTimer); this.pendingShared = undefined; if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.resize.disconnect(); this.disposers.forEach(fn => fn()); void this.canvas.dispose(); }
 }

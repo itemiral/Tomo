@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {presenceName,readPerson,readActivity,readCursor,readRoom,uniquePeople,worldPoint,screenPoint} from '../src/components/muze/presence-state.ts';
+import {presenceName,readPerson,readActivity,readCursor,readRoom,updateCursor,uniquePeople,worldPoint,screenPoint} from '../src/components/muze/presence-state.ts';
 const person={userId:'user_one',name:'Izat',tabId:'tab_one',pageId:'page_one',muse:'idle'};
 test('presence accepts only a bounded public description and drops private fields',()=>{
  const parsed=readPerson({...person,soul:'Private',memory:'Private',chat:['Private'],email:'private@example.test'});
@@ -22,6 +22,24 @@ test('cursors reject invalid coordinates and carry no personal context',()=>{
  assert.equal(readCursor({...person,x:Infinity,y:20}),null);assert.equal(readCursor({...person,x:1_000_001,y:20}),null);
  assert.deepEqual(readCursor({...person,x:12,y:20,soul:'hidden'}),{tabId:'tab_one',pageId:'page_one',x:12,y:20});
  assert.deepEqual(readCursor({...person,x:null,y:null}),{tabId:'tab_one',pageId:'page_one',x:null,y:null});
+});
+test('stationary cursor replays do not outrank movement in another tab',()=>{
+ const position={tabId:person.tabId,pageId:person.pageId,x:12,y:20};
+ const first=updateCursor(person,position,undefined,100);
+ const otherPerson={...person,tabId:'tab_two'},other=updateCursor(otherPerson,{...position,tabId:'tab_two',x:80},undefined,200);
+ const replay=updateCursor({...person,name:'Izat T.'},position,first,300);
+ assert.equal(replay.receivedAt,100);assert.equal(replay.name,'Izat T.');assert.ok(other.receivedAt>replay.receivedAt);
+ const moved=updateCursor(person,{...position,x:14},replay,400);
+ assert.equal(moved.receivedAt,400);assert.ok(moved.receivedAt>other.receivedAt);
+ const returned=updateCursor(person,position,moved,500);
+ assert.equal(returned.receivedAt,500);
+ assert.equal(updateCursor(person,{...position,x:null,y:null},returned,600),null);
+});
+test('cursor recency resets for a different page, tab or owner',()=>{
+ const position={tabId:person.tabId,pageId:person.pageId,x:12,y:20},previous=updateCursor(person,position,undefined,100);
+ for(const changes of [{pageId:'page_two'},{tabId:'tab_two'},{userId:'user_two'}]){
+  assert.equal(updateCursor({...person,...changes},{...position,...changes},previous,200).receivedAt,200);
+ }
 });
 test('world coordinates stay accurate across different browsers pan and zoom',()=>{
  const point=worldPoint(500,350,[2,0,0,2,100,50]);assert.deepEqual(point,{x:200,y:150});

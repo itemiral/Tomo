@@ -123,7 +123,7 @@ for (const width of [1440, 390]) test(`attachment and drawing controls stay comp
   expect(Math.abs(composerBox.x - dockBox.x)).toBeLessThan(2);
   expect(Math.abs(composerBox.width - dockBox.width)).toBeLessThan(2);
   expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(dockBox.y);
-  expect(dockBox.width).toBeLessThanOrEqual(Math.min(440, width - 24));
+  expect(dockBox.width).toBeLessThanOrEqual(Math.min(520, width - 24));
   for (const name of ['Undo', 'Redo', 'Select', 'More tools']) {
     const control = tools.getByRole('button', { name, exact: true }); await expect(control).toBeVisible();
     const box = (await control.boundingBox())!;

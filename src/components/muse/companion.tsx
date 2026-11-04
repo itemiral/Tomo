@@ -11,7 +11,7 @@ import type { MuseActions, MuseApplyResult } from '@/lib/muse-board';
 import { museProgressLabel, type MusePreparedContext, type MuseProgress } from '@/lib/muse-request';
 import { clearMusePreview, loadMusePreviewImage, musePortraitSource, readMusePreview, saveMusePreview, setMusePreviewOwner } from './preview-cache';
 import './muse.css';
-type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:(message?:string,signal?:AbortSignal)=>Promise<string|MusePreparedContext>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions)=>MuseApplyResult};
+type Props={attachImage:(file:File,signal:AbortSignal)=>Promise<void>;onActivity?:(activity:MuseActivity)=>void;selectedIds?:string[];prepareContext?:(message?:string,signal?:AbortSignal)=>Promise<string|MusePreparedContext>;appearanceSelected?:boolean;appearanceAnchor?:{x:number;y:number};openAppearance?:()=>void;appearanceChanged?:()=>Promise<void>;open:boolean;onOpenChange:(open:boolean)=>void;chatRequest:number;beforeSend?:()=>Promise<void>;obstacles:Obstacle[];thread:string;boardContext:string;applyActions:(actions:MuseActions,signal?:AbortSignal)=>MuseApplyResult|Promise<MuseApplyResult>};
 export function MuseCompanion(props:Props) {
  const {isLoaded,isSignedIn,user}=useUser(),clerk=useClerk();
  const [guestText,setGuestText]=useState('');
@@ -113,9 +113,10 @@ function OwnedMuse({attachImage,onActivity,selectedIds,prepareContext,appearance
     }catch(cause){if(generation===ownerVersion.current&&!abort.signal.aborted){setAvatarState('error');setAvatarStatus('Avatar unchanged. Use the retry control to try again or choose another image.');if(cause instanceof RequestError&&cause.status===401)clear();}}
     finally{if(avatarRequest.current===abort)avatarRequest.current=null;}
   }
-  function apply(actions: MuseActions) {
+  async function apply(actions: MuseActions, signal?: AbortSignal) {
+    const result = await applyActions(actions, signal);
+    signal?.throwIfAborted();
     stopActivity();
-    const result = applyActions(actions);
     if (result.ids.length) {
       setActivity({label:'',targetId:result.ids[0],targetIds:result.ids,thread,ownerId:userId});
       activityTimer.current=setTimeout(stopActivity,1600);
