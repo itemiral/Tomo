@@ -127,6 +127,36 @@ test('authentication, origin and JSON compatibility remain outside the progress 
 });
 
 const sharedBody=()=>({thread:'1d6e0a20-9095-4bd3-a826-f53c6d9cd480:page',sharedBoardId:'1d6e0a20-9095-4bd3-a826-f53c6d9cd480',requestId:'4a468f80-a4fe-4027-b6cd-a663df1095d5',board:JSON.stringify({board:'Shared',page:'Page',objects:[{id:'note',type:'MuzeNote',text:'Shared task',editable:true}],selectedIds:['note']})});
+test('the first planning turn on empty and blank-note shared boards reaches the owner Muse and streams its cards',async()=>{
+ const message='can you help me make a trip to Tokyo for 2 people, me and my girlfriend';
+ for(const objects of [[],[{id:'blank-note',type:'MuzeNote',text:'',editable:true}]]){
+  const body={...sharedBody(),message,board:JSON.stringify({board:'Trip to Tokyo',page:'Page',objects,selectedIds:[]})};
+  fixture.leaseCalls.length=0;fixture.leaseAction=async()=>({data:{},error:null});queries.length=0;
+  const cards=[{id:'tokyo-first',title:'Tokyo together',body:'Start with your dates and the pace you want.'}];
+  fixture.ask=async(owner,received,signal,effort,progress)=>{
+   assert.equal(owner,'owner-two');assert.equal(scope.getStore(),'owner-two');
+   assert.equal(received.message,message);assert.equal(received.thread,body.thread);
+   assert.deepEqual(JSON.parse(received.board).objects,objects);
+   assert.equal(effort,'low');assert.equal(signal.aborted,false);
+   assert.deepEqual(fixture.leaseCalls.map(call=>call.operation),['acquire']);
+   progress('context');
+   const memory=await readFile(join(museDirectory(owner),'memory.md'),'utf8');
+   assert.equal(memory,'memory-for-owner-two');
+   progress('thinking');
+   return {messages:[{id:'first-answer',role:'assistant',content:'A starting point for your Tokyo trip.'}],actions:{cards,updates:[]}};
+  };
+  const response=await post('owner-two',{body});
+  assert.equal(response.status,200);
+  const result=await events(response);
+  assert.deepEqual(result.map(event=>event.type),['progress','progress','result']);
+  assert.deepEqual(result.at(-1).result.actions.cards,cards);
+  assert.deepEqual(queries.map(query=>query.owner_id),['owner-two']);
+  assert.deepEqual(fixture.leaseCalls.map(call=>[call.ownerId,call.operation]),[['owner-two','acquire'],['owner-two','renew']]);
+  assert.deepEqual(fixture.leaseCalls[0].objects,objects.map(object=>({pageId:'page',objectId:object.id})));
+  assert(fixture.leaseCalls.every(call=>call.board_id===body.sharedBoardId&&call.request_id===body.requestId));
+  assert.doesNotMatch(JSON.stringify(fixture.leaseCalls),/Tokyo|girlfriend|memory-for-|soul\.md/);
+ }
+});
 test('shared requests acquire protection before model use and renew it through browser application',async()=>{
  fixture.leaseCalls.length=0;fixture.leaseAction=async()=>({data:{},error:null});
  fixture.ask=async()=>{assert.deepEqual(fixture.leaseCalls.map(call=>call.operation),['acquire']);return {messages:[],actions:{cards:[],updates:[]}};};
