@@ -24,7 +24,8 @@ test('defaults belong to every owner and learned style and memories populate edi
   const owner = 'learning-defaults';
   const initial = await readMuseLearning(owner, 'board:page');
   assert.equal(Object.keys(DEFAULT_MUSE_STYLE).length, 6);
-  assert.match(initial.notes.soul.content, /My default style/);
+  assert.equal(initial.notes.soul.content, '# Soul\n');
+  assert.equal(initial.notes.memory.content, '# Memory\n');
   assert.deepEqual(initial.entries, []);
   const message = 'I prefer brief bullet points and I live in Santa Cruz.';
   const result = await turn(owner, message, [update('soul', 'format', 'Prefer brief bullet points.', 'I prefer brief bullet points'), update('memory', 'home', 'Lives in Santa Cruz.', 'I live in Santa Cruz')]);
@@ -196,4 +197,53 @@ test('explicit forgetting removes generated context and excludes source messages
   await turn(owner, 'Forget my favorite drink.', [update('memory', 'drink', '', 'Forget my favorite drink', 'owner', 'forget')]);
   assert.doesNotMatch((await readMuseLearning(owner, 'board:page')).memoryContext, /rooibos/);
   assert.deepEqual(await readMuseArchive(owner, 'board:page', 'rooibos'), []);
+});
+
+
+test('old onboarding text is removed without removing learned experience or handwritten notes', async () => {
+  const { LEGACY_NOTE_TEMPLATES, PREVIOUS_NOTE_TEMPLATES } = await import('../scripts/muse-defaults.mjs');
+  const owner = 'learning-clean-templates';
+  await turn(owner, 'I live in Santa Cruz.', [update('memory', 'home', 'Lives in Santa Cruz.', 'I live in Santa Cruz')]);
+  let note = await readMuseNote(owner, 'memory');
+  await saveMuseNote(owner, 'memory', note.content.replace('# Memory', LEGACY_NOTE_TEMPLATES.memory.trimEnd()) + '\nMy own travel notes.', note.revision);
+  note = await readMuseNote(owner, 'memory');
+  assert.doesNotMatch(note.content, /Add the context|How I like to plan/);
+  assert.match(note.content, /Lives in Santa Cruz/);
+  assert.match(note.content, /My own travel notes/);
+  let soul = await readMuseNote(owner, 'soul');
+  await saveMuseNote(owner, 'soul', PREVIOUS_NOTE_TEMPLATES.soul + '\nMy own working style.', soul.revision);
+  soul = await readMuseNote(owner, 'soul');
+  assert.doesNotMatch(soul.content, /Make me yours|My default style/);
+  assert.match(soul.content, /My own working style/);
+});
+
+const observed = (text, evidence) => ({...update('soul', 'detail', text, evidence), basis: 'observed'});
+test('working-style choices need three independent quotes and stay private until supported', async () => {
+  const owner = 'learning-pattern';
+  for (const message of ['Shorten these notes.', 'Make this answer shorter.']) await turn(owner, message, [observed('Prefers brief answers.', message)]);
+  let learning = await readMuseLearning(owner, 'board:page');
+  assert.equal(learning.observations[0].count, 2);
+  assert.equal(learning.entries.length, 0);
+  assert.doesNotMatch(learning.soulContext, /brief answers/);
+  await turn(owner, 'Make this answer shorter.', [observed('Prefers brief answers.', 'Make this answer shorter.')]);
+  assert.equal((await readMuseLearning(owner, 'board:page')).entries.length, 0, 'repeated identical quote is not new evidence');
+  await turn(owner, 'Trim the details here.', [observed('Prefers brief answers.', 'Trim the details here.')]);
+  learning = await readMuseLearning(owner, 'another:page');
+  assert.equal(learning.entries[0].basis, 'observed');
+  assert.deepEqual(learning.observations, [], 'a learned pattern is no longer pending');
+  assert.match(learning.soulContext, /Prefers brief answers/);
+  assert.equal((await readMuseLearning('learning-pattern-other-owner', 'board:page')).observations.length, 0);
+});
+
+test('contradictory choices reset tentative style and cannot replace explicit preferences', async () => {
+  const owner = 'learning-pattern-correction';
+  await turn(owner, 'Shorten this.', [observed('Prefers brief answers.', 'Shorten this.')]);
+  await turn(owner, 'Explain more here.', [observed('Prefers detailed answers.', 'Explain more here.')]);
+  assert.equal((await readMuseLearning(owner, 'board:page')).observations[0].count, 1);
+  await turn(owner, 'Always be concise.', [update('soul', 'detail', 'Always be concise.', 'Always be concise.')]);
+  for (const message of ['Explain that.', 'More detail please.', 'Expand this answer.']) await turn(owner, message, [observed('Prefers detailed answers.', message)]);
+  const learning = await readMuseLearning(owner, 'board:page');
+  assert.equal(learning.observations.length, 0);
+  assert.match(learning.soulContext, /Always be concise/);
+  assert.doesNotMatch(learning.soulContext, /Prefers detailed/);
 });
