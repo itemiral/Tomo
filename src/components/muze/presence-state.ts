@@ -23,6 +23,12 @@ export function readCursor(value:unknown):CursorPosition|null{
   if(typeof value.x!=='number'||typeof value.y!=='number'||!Number.isFinite(value.x)||!Number.isFinite(value.y)||Math.abs(value.x)>1_000_000||Math.abs(value.y)>1_000_000)return null;
   return {tabId:value.tabId,pageId:value.pageId,x:value.x,y:value.y};
 }
+export function updateCursor(person:BoardPerson,point:CursorPosition,previous:BoardCursor|undefined,receivedAt=Date.now()):BoardCursor|null{
+  if(point.x===null||point.y===null)return null;
+  // Replayed positions must not steal recency from another tab's movement.
+  const unchanged=previous&&previous.userId===person.userId&&previous.tabId===point.tabId&&previous.pageId===point.pageId&&previous.x===point.x&&previous.y===point.y;
+  return {...person,x:point.x,y:point.y,receivedAt:unchanged?previous.receivedAt:receivedAt};
+}
 export function readRoom(state:unknown):BoardPerson[]{
   if(!record(state))return [];
   const people=new Map<string,BoardPerson>();

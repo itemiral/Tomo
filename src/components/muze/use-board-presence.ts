@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {useSession} from '@clerk/nextjs';
 import {getClientSessionToken,sessionTokenExpiration,useSupabaseClient} from '@/utils/supabase/client';
-import {museTargetId,presenceName,readActivity,readCursor,readRoom,worldPoint,type BoardActivity,type BoardCursor,type BoardPerson,type CursorPosition} from './presence-state';
+import {museTargetId,presenceName,readActivity,readCursor,readRoom,updateCursor,worldPoint,type BoardActivity,type BoardCursor,type BoardPerson,type CursorPosition} from './presence-state';
 import {reservePresenceUpdate} from './presence-schedule';
 
 type Options={boardId?:string;userId?:string;name:string;pageId?:string;viewport:number[];enabled:boolean;museWorking:boolean;museTargetId?:string};
@@ -23,7 +23,7 @@ export function useBoardPresence(options:Options){
   let cancelled=false,joined=false,subscribed=false,restarting=false,ready=false,validUntil=0;
   let peers:BoardPerson[]=[],announced:BoardPerson|null=null,cursors=new Map<string,BoardCursor>();
   const activities=new Map<string,BoardActivity>();let activityRevision=0,activityKey='',lastActivity='',forceActivity=false;
-  let pointer=lastPointer.current.scope===scope&&!document.hidden?lastPointer.current.point:null,pending:CursorPosition|null=null,lastSent=0,trackBusy=false,authBusy=false,authAttempt=0;
+  let pointer=lastPointer.current.scope===scope?lastPointer.current.point:null,pending:CursorPosition|null=null,lastSent=0,trackBusy=false,authBusy=false,authAttempt=0;
   let activityTimer:ReturnType<typeof setTimeout>|undefined,cursorTimer:ReturnType<typeof setTimeout>|undefined,trackTimer:ReturnType<typeof setTimeout>|undefined,authRetry:ReturnType<typeof setTimeout>|undefined,tokenTimer:ReturnType<typeof setTimeout>|undefined,restartTimer:ReturnType<typeof setTimeout>|undefined;
   const active=()=>!cancelled&&current.current.scope===scope;
   const authorized=()=>active()&&!restarting&&validUntil>Date.now();
@@ -59,7 +59,7 @@ export function useBoardPresence(options:Options){
     const {tabId,pageId,muse,museTargetId,activityRevision}=desired(),value={tabId,pageId,muse,...(museTargetId?{museTargetId}:{})},key=JSON.stringify(value);
     if(!forceActivity&&key===lastActivity)return;forceActivity=false;lastActivity=key;
     void channel.send({type:'broadcast',event:'activity',payload:{...value,revision:activityRevision}}).catch(()=>{});
-    if(pointer&&!document.hidden)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));
+    if(pointer)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));
    },50);
   };
   const scheduleTrack=(delay=100)=>{
@@ -73,21 +73,21 @@ export function useBoardPresence(options:Options){
    trackBusy=true;
    try{
     const result=await channel.track(value);if(!authorized()||!joined)return;
-    if(result==='ok'){announced=value;ready=true;reconnect.current.attempt=0;render();scheduleActivity();if(pointer&&!document.hidden)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));}
+    if(result==='ok'){announced=value;ready=true;reconnect.current.attempt=0;render();scheduleActivity();if(pointer)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));}
     else if(channel.state!=='joined'){restart();return;}
    }catch{if(active()&&channel.state!=='joined'){restart();return;}}
    finally{trackBusy=false;}
    if(authorized()&&(!announced||JSON.stringify(desired())!==JSON.stringify(announced)))scheduleTrack(1000);
   };
-  const hide=()=>{const visible=pointer!==null;pointer=null;lastPointer.current={scope,point:null};if(!visible)return;queueCursor(null);if(cursorTimer){clearTimeout(cursorTimer);cursorTimer=undefined;flushCursor();}};
-  const changed=()=>{scheduleActivity();scheduleTrack();if(pointer&&!document.hidden)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));};
+  const changed=()=>{scheduleActivity();scheduleTrack();if(pointer)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));};
   const room={scope,changed};roomRef.current=room;
   const move=(event:PointerEvent)=>{
-   if(event.pointerType==='touch'||document.hidden||!(event.target instanceof Element)||!event.target.closest('.muze-app')){hide();return;}
+   if(event.pointerType==='touch'||document.hidden||!(event.target instanceof Element)||!event.target.closest('.muze-app'))return;
    pointer={x:event.clientX,y:event.clientY};lastPointer.current={scope,point:pointer};queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));
   };
-  const leave=(event:PointerEvent)=>{if(!event.relatedTarget)hide();};
-  const visibility=()=>{if(document.hidden)hide();};
+  // A window switch is not a board departure. Keep the last position until
+  // membership ends, and replay it when the browser resumes without a move.
+  const resume=()=>{if(document.hidden)return;void refreshAuth().then(changed);};
   channel.on('presence',{event:'sync'},()=>{
    if(!authorized())return;
    const previous=new Set(peers.map(person=>person.tabId));
@@ -100,7 +100,7 @@ export function useBoardPresence(options:Options){
    for(const key of activities.keys())if(!present.has(key))activities.delete(key);
    for(const [key,cursor] of cursors){const person=present.get(key);if(!person||person.pageId!==cursor.pageId)cursors.delete(key);else cursors.set(key,{...cursor,...person});}
    render();
-   if(peers.some(person=>person.tabId!==tabId&&!previous.has(person.tabId))){scheduleActivity(true);if(pointer&&!document.hidden)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));}
+   if(peers.some(person=>person.tabId!==tabId&&!previous.has(person.tabId))){scheduleActivity(true);if(pointer)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));}
   });
   channel.on('broadcast',{event:'activity'},({payload})=>{
    if(!authorized())return;const activity=readActivity(payload);if(!activity||activity.tabId===tabId)return;
@@ -115,7 +115,7 @@ export function useBoardPresence(options:Options){
   channel.on('broadcast',{event:'cursor'},({payload})=>{
    if(!authorized())return;const point=readCursor(payload);if(!point||point.tabId===tabId)return;
    const person=peers.find(peer=>peer.tabId===point.tabId&&peer.pageId===point.pageId&&peer.userId!==current.current.userId);if(!person)return;
-   if(point.x===null||point.y===null)cursors.delete(point.tabId);else cursors.set(point.tabId,{...person,x:point.x,y:point.y,receivedAt:Date.now()});render();
+   const cursor=updateCursor(person,point,cursors.get(point.tabId));if(cursor)cursors.set(point.tabId,cursor);else cursors.delete(point.tabId);render();
   });
   const refreshAuth=async()=>{
    if(authBusy||!active()||restarting)return;authBusy=true;
@@ -131,9 +131,9 @@ export function useBoardPresence(options:Options){
   };
   void refreshAuth();
   const refresh=setInterval(()=>void refreshAuth(),30000);
-  const keepalive=setInterval(()=>{if(!authorized()||!ready)return;if(announced&&JSON.stringify(desired())!==JSON.stringify(announced))scheduleActivity(true);if(pointer&&!document.hidden)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));},3000);
-  window.addEventListener('pointermove',move,{capture:true,passive:true});window.addEventListener('pointerout',leave);window.addEventListener('blur',hide);document.addEventListener('visibilitychange',visibility);render();
-  return()=>{cancelled=true;if(current.current.scope!==scope)lastPointer.current={scope:'',point:null};pointer=null;ready=false;if(roomRef.current===room)roomRef.current=null;clearInterval(refresh);clearInterval(keepalive);for(const timer of [activityTimer,cursorTimer,trackTimer,authRetry,tokenTimer,restartTimer])if(timer)clearTimeout(timer);window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerout',leave);window.removeEventListener('blur',hide);document.removeEventListener('visibilitychange',visibility);void client.removeChannel(channel);};
+  const keepalive=setInterval(()=>{if(!authorized()||!ready)return;if(announced&&JSON.stringify(desired())!==JSON.stringify(announced))scheduleActivity(true);if(pointer)queueCursor(worldPoint(pointer.x,pointer.y,current.current.viewport));},3000);
+  window.addEventListener('pointermove',move,{capture:true,passive:true});window.addEventListener('focus',resume);document.addEventListener('visibilitychange',resume);render();
+  return()=>{cancelled=true;if(current.current.scope!==scope)lastPointer.current={scope:'',point:null};pointer=null;ready=false;if(roomRef.current===room)roomRef.current=null;clearInterval(refresh);clearInterval(keepalive);for(const timer of [activityTimer,cursorTimer,trackTimer,authRetry,tokenTimer,restartTimer])if(timer)clearTimeout(timer);window.removeEventListener('pointermove',move,true);window.removeEventListener('focus',resume);document.removeEventListener('visibilitychange',resume);void client.removeChannel(channel);};
  },[scope,client,connection]);
  useEffect(()=>{const room=roomRef.current;if(room?.scope===scope)room.changed();},[scope,options.name,options.pageId,options.museWorking,options.museTargetId,viewportKey]);
  return view.scope===scope&&scope?view:{scope,peers:[],cursors:[],connected:false};
