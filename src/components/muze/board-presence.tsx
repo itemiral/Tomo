@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState,type CSSProperties} from 'react';
 import {MuseAvatarImage} from '../muse/avatar-image';
 import type {BoardProfile,BoardProfiles} from './board-profiles';
 import '../muse/muse.css';
@@ -34,29 +34,39 @@ function itemBox(item:WorkItem,viewport:number[]):ScreenBox|null{
   const x=Math.min(...corners.map(p=>p.x)),y=Math.min(...corners.map(p=>p.y)),box={x,y,w:Math.max(...corners.map(p=>p.x))-x,h:Math.max(...corners.map(p=>p.y))-y};
   return [box.x,box.y,box.w,box.h].every(Number.isFinite)?box:null;
 }
-function workAnchor(person:BoardPerson,items:WorkItem[],viewport:number[],occupied:ScreenBox[]){
+function workBox(person:BoardPerson,items:WorkItem[],viewport:number[]){
   if(person.muse!=='working'||!person.museTargetId||typeof window==='undefined')return null;
-  const item=items.find(item=>item.id===person.museTargetId);
-  const box=item?itemBox(item,viewport):null;
-  if(!box||!intersects(box,{x:0,y:0,w:innerWidth,h:innerHeight}))return null;
-  const notes=items.filter(other=>other.id!==item!.id).map(other=>itemBox(other,viewport)).filter((other):other is ScreenBox=>!!other&&!(other.x<=box.x&&other.y<=box.y&&other.x+other.w>=box.x+box.w&&other.y+other.h>=box.y+box.h));
-  const candidates=[{x:box.x+box.w+12,y:box.y},{x:box.x-52,y:box.y},{x:box.x+box.w-40,y:box.y-52},{x:box.x+box.w-40,y:box.y+box.h+12}].map(point=>({...point,w:40,h:40}));
-  const badge=candidates.find(candidate=>candidate.x>=8&&candidate.y>=60&&candidate.x+candidate.w<=innerWidth-8&&candidate.y+candidate.h<=innerHeight-8&&![...occupied,...notes].some(other=>intersects(candidate,other)));
-  if(badge)occupied.push({x:badge.x-4,y:badge.y-4,w:badge.w+8,h:badge.h+8});
-  return {box,badge};
+  const item=items.find(item=>item.id===person.museTargetId),box=item?itemBox(item,viewport):null;
+  return box&&intersects(box,{x:0,y:0,w:innerWidth,h:innerHeight})?box:null;
 }
 export function BoardPeerMuses({peers,userId,pageId,profiles={},items=[],viewport=[1,0,0,1,0,0]}:{peers:BoardPerson[];userId?:string;pageId:string;profiles?:BoardProfiles;items?:WorkItem[];viewport?:number[]}){
   const people=uniquePeople(peers.filter(person=>person.userId!==userId&&person.pageId===pageId));
-  const occupied:ScreenBox[]=typeof document==='undefined'?[]:[...document.querySelectorAll('.muze-header,.board-participants,.muze-style-panel,.muze-popover,.muse-chat-stack,.muze-toolbar-dock,.muze-navigation,.muze-bottom-right,.muse-floating')].map(element=>element.getBoundingClientRect()).filter(box=>box.width&&box.height).map(box=>({x:box.x-6,y:box.y-6,w:box.width+12,h:box.height+12}));
-  const visible=people.slice(0,4).map(person=>({person,anchor:workAnchor(person,items,viewport,occupied)}));
+  const visible=people.slice(0,4).map(person=>({person,box:workBox(person,items,viewport)}));
+  const roster=useRef<HTMLElement>(null),[bottom,setBottom]=useState(108);
+  useEffect(()=>{
+    if(!people.length)return;
+    const place=()=>{
+      const rect=roster.current?.getBoundingClientRect(),tools=document.querySelector('.muze-toolbar-dock')?.getBoundingClientRect(),chat=document.querySelector('.muse-chat-stack')?.getBoundingClientRect();
+      let next=tools?innerHeight-tools.top+12:108;
+      if(rect&&chat&&chat.width&&chat.height&&rect.left<chat.right+12&&rect.right>chat.left-12)next=Math.max(next,innerHeight-chat.top+12);
+      setBottom(Math.round(next));
+    };
+    const observer=new ResizeObserver(place);
+    for(const selector of ['.muze-toolbar-dock','.muse-chat-stack']){const element=document.querySelector(selector);if(element)observer.observe(element);}
+    if(roster.current)observer.observe(roster.current);
+    window.addEventListener('resize',place);place();
+    return()=>{observer.disconnect();window.removeEventListener('resize',place);};
+  },[people.length]);
   return <>
-    <div className="board-muse-targets" aria-label="Muse activity">{visible.filter(entry=>entry.anchor).map(({person,anchor})=>{
-      const profile=profiles[person.userId],name=profile?.name||person.name,museName=profile?.museName||'Muse',color=personColor(person.userId),{box,badge}=anchor!;
-      return <div key={person.userId} data-target-id={person.museTargetId}>
-        <span className="board-muse-target-outline" aria-hidden="true" style={{left:box.x-6,top:box.y-6,width:box.w+12,height:box.h+12,color}}/>
-        {badge&&<div className="board-muse-target-avatar" aria-label={name+'’s '+museName+', '+person.muse} title={name+'’s '+museName} style={{left:badge.x,top:badge.y,color}}><div className="board-peer-muse-icon"><ParticipantMuse profile={profile}/></div></div>}
-      </div>;
-    })}</div>
-    <div className="board-peer-muses" aria-label="Collaborators’ Muses">{visible.filter(entry=>!entry.anchor?.badge).map(({person})=>{const profile=profiles[person.userId],name=profile?.name||person.name,museName=profile?.museName||'Muse';return <div key={person.userId} className={'board-peer-muse'+(person.muse==='working'?' working':'')} aria-label={name+'’s '+museName+', '+person.muse}><div className="board-peer-muse-icon"><ParticipantMuse profile={profile}/></div><span title={name+'’s '+museName}>{museName==='Muse'?name+'’s Muse':museName}</span>{museName!=='Muse'&&<small>{name}’s Muse</small>}{person.muse==='working'&&<small>Working</small>}</div>;})}{people.length>4&&<span className="board-more-muses">+{people.length-4} Muses</span>}</div>
+    <div className="board-muse-targets" aria-label="Muse activity">{visible.filter(entry=>entry.box).map(({person,box})=><div key={person.userId} data-target-id={person.museTargetId}><span className="board-muse-target-outline" aria-hidden="true" style={{left:box!.x-6,top:box!.y-6,width:box!.w+12,height:box!.h+12,color:personColor(person.userId)}}/></div>)}</div>
+    {!!people.length&&<aside ref={roster} className="board-peer-muses" aria-label="Collaborators’ Muses" data-muse-ui="true" style={{'--peer-muses-bottom':bottom+'px'} as CSSProperties}>
+      <header><span>Muses</span><small>{people.length} here</small></header>
+      <div className="board-peer-muse-list">{visible.map(({person})=>{const profile=profiles[person.userId],name=profile?.name||person.name,museName=profile?.museName||'Muse';return <div key={person.userId} className={'board-peer-muse'+(person.muse==='working'?' working':'')} aria-label={name+'’s '+museName+', '+person.muse}>
+        <div className="board-peer-muse-icon"><ParticipantMuse profile={profile}/><span className="board-peer-owner-avatar"><ParticipantAvatar name={name} src={profile?.avatarUrl}/></span></div>
+        <div className="board-peer-muse-copy"><span title={museName}>{museName}</span><small title={name}>with {name}</small></div>
+        <span className="board-peer-muse-state"><i aria-hidden="true"/>{person.muse==='working'?'Working':'Here'}</span>
+      </div>;})}</div>
+      {people.length>4&&<span className="board-more-muses">+{people.length-4} more</span>}
+    </aside>}
   </>;
 }
