@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -24,8 +24,10 @@ test('defaults belong to every owner and learned style and memories populate edi
   const owner = 'learning-defaults';
   const initial = await readMuseLearning(owner, 'board:page');
   assert.equal(Object.keys(DEFAULT_MUSE_STYLE).length, 6);
-  assert.equal(initial.notes.soul.content, '# Soul\n');
-  assert.equal(initial.notes.memory.content, '# Memory\n');
+  const {MUSE_NOTE_TEMPLATES} = await import('../scripts/muse-defaults.mjs');
+  assert.equal(initial.notes.soul.content, MUSE_NOTE_TEMPLATES.soul);
+  assert.equal(initial.notes.memory.content, MUSE_NOTE_TEMPLATES.memory);
+  assert.doesNotMatch(initial.notes.soul.content, /Make me yours/);
   assert.deepEqual(initial.entries, []);
   const message = 'I prefer brief bullet points and I live in Santa Cruz.';
   const result = await turn(owner, message, [update('soul', 'format', 'Prefer brief bullet points.', 'I prefer brief bullet points'), update('memory', 'home', 'Lives in Santa Cruz.', 'I live in Santa Cruz')]);
@@ -213,7 +215,7 @@ test('old onboarding text is removed without removing learned experience or hand
   let soul = await readMuseNote(owner, 'soul');
   await saveMuseNote(owner, 'soul', PREVIOUS_NOTE_TEMPLATES.soul + '\nMy own working style.', soul.revision);
   soul = await readMuseNote(owner, 'soul');
-  assert.doesNotMatch(soul.content, /Make me yours|My default style/);
+  assert.doesNotMatch(soul.content, /Make me yours/);
   assert.match(soul.content, /My own working style/);
 });
 
@@ -246,4 +248,42 @@ test('contradictory choices reset tentative style and cannot replace explicit pr
   assert.equal(learning.observations.length, 0);
   assert.match(learning.soulContext, /Always be concise/);
   assert.doesNotMatch(learning.soulContext, /Prefers detailed/);
+});
+
+
+test('header-only notes receive starting copy once without losing experience or overriding later edits', async () => {
+  const {MEMORY_INTRODUCTION} = await import('../scripts/muse-defaults.mjs');
+  const owner = 'learning-restore-defaults';
+  await turn(owner, 'I prefer short answers and I live in Santa Cruz.', [update('soul','detail','Prefer short answers.','I prefer short answers'),update('memory','home','Lives in Santa Cruz.','I live in Santa Cruz')]);
+  const directory = museDirectory(owner);
+  for (const key of ['soul','memory']) {
+    const note = await readMuseNote(owner,key);
+    const block = note.content.match(/<!-- muze-learned:start -->[\s\S]*?<!-- muze-learned:end -->/)[0];
+    await writeFile(join(directory,key+'.md'), (key==='soul'?'# Soul':'# Memory')+'\n\n'+block+'\n');
+  }
+  const identityPath = join(directory,'identity.json'), identity = JSON.parse(await readFile(identityPath,'utf8'));
+  delete identity.noteDefaultsVersion;
+  await writeFile(identityPath,JSON.stringify(identity));
+  const restored = await readMuseLearning(owner,'board:page');
+  assert.match(restored.notes.soul.content,/Who I am/);
+  assert.doesNotMatch(restored.notes.soul.content,/Make me yours/);
+  assert.ok(restored.notes.memory.content.includes(MEMORY_INTRODUCTION));
+  assert.match(restored.notes.memory.content,/Lives in Santa Cruz/);
+  assert.equal(restored.entries.length,2);
+  await saveMuseNote(owner,'soul','',restored.notes.soul.revision);
+  await saveMuseNote(owner,'memory',restored.notes.memory.content.replace(MEMORY_INTRODUCTION,'My own introduction.'),restored.notes.memory.revision);
+  for (let i=0;i<2;i++) {
+    assert.equal((await readMuseNote(owner,'soul')).content,'');
+    const memory = (await readMuseNote(owner,'memory')).content;
+    assert.doesNotMatch(memory,/Your Muse learns what matters/);
+    assert.match(memory,/My own introduction/);
+    assert.match(memory,/Lives in Santa Cruz/);
+  }
+});
+
+
+test('default restoration never treats a handwritten Memory identity as a Soul name declaration', async () => {
+  const {restoreMuseNoteDefaults} = await import('../scripts/muse-defaults.mjs');
+  const memory='# Memory\n\nMy name is Kumo.\n';
+  assert.equal(restoreMuseNoteDefaults(memory,'memory','Kumo'),memory);
 });
