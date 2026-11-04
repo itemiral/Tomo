@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { museFixture, exported, chat, send } from './muse-fixture';
 import type { Board } from '../src/components/muze/storage';
 import {removesProtectedObjects, type ProtectedBoardObject} from '../src/lib/shared-board-leases';
+import sharp from 'sharp';
+import {normalizeBoardImage} from '../scripts/muse-image-import.mjs';
 
 const boardId = '1d6e0a20-9095-4bd3-a826-f53c6d9cd480';
 type Role = 'owner' | 'editor';
@@ -163,6 +165,41 @@ test('an invited editor sees shared notes and changes sync back without publishi
     await expect.poll(() => canvasText(second)).not.toContain('Invitetheneighborhood');
     expect(api.joins).not.toContain('owner-c');
   } finally { await secondContext.close(); }
+});
+
+test('a generated WebP image saves to the shared board, reaches an invited editor, and survives reload', async ({ page, browser }) => {
+  const api = sharedApi(); await api.attach(page, () => 'owner-a');
+  const owner = await museFixture(page);
+  const share = await openShare(page);
+  await share.getByRole('button', { name: 'Create invite link', exact: true }).click();
+  await expect(share.getByRole('button', { name: 'Copy invite link', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const peer = await context.newPage(); await api.attach(peer, () => 'owner-b');
+    const invited = await museFixture(peer); await invited.owner('owner-b'); await openLink(peer, api.token()!);
+    await expect.poll(() => api.joins).toEqual(['owner-b']);
+    await expect.poll(() => new URL(peer.url()).hash).toBe('');
+    const pixels = await sharp({ create: { width: 640, height: 480, channels: 4, background: '#f4cf3d' } }).png().toBuffer();
+    const src = await normalizeBoardImage(pixels), imageId = 'shared-generated-banana';
+    expect(src).toMatch(/^data:image\/webp;base64,/);
+    owner.response(async () => ({ cards: [], updates: [], images: [{ id: imageId, src, sourceTitle: 'Generated with Muse', retrievedAt: '2026-11-03T12:00:00Z' }] }));
+    await chat(page); await send(page, 'Draw a banana with a face');
+    await expect(page.getByText('Prepared the next steps for your board.', { exact: true })).toBeVisible();
+    await expect.poll(() => api.current()?.pages[0].objects.find(object => object.id === imageId)).toMatchObject({ type: 'Image', src, width: 640, height: 480 });
+    const peerImage = peer.locator('.muze-vector-surface [id="' + imageId + '"]');
+    await expect(peerImage).toBeVisible({ timeout: 10000 });
+    expect((await exported(peer)).objects.find(object => object.id === imageId)).toMatchObject({ type: 'Image', src });
+
+    // Reload the invited view from the shared API, rather than a browser-local scene.
+    await peer.addInitScript(() => { (window as any).fixtureOwner = 'owner-b'; });
+    await peer.route('**/__muse-fixture?*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><link rel="stylesheet" href="/__fixture.css"><div id="root"></div><script src="/__fixture.js"></script>' }));
+    await peer.reload();
+    await expect(peer.getByRole('main', { name: 'Muze' })).toHaveAttribute('data-ready', 'true');
+    await expect(peerImage).toBeVisible();
+    expect((await exported(peer)).objects.find(object => object.id === imageId)).toMatchObject({ type: 'Image', src });
+    expect(JSON.stringify(api.saves)).not.toMatch(/muse-file-soul|muse-file-memory|muse-private/);
+  } finally { await context.close(); }
 });
 
 test('conflicting edits keep the local draft until the person reloads the shared version', async ({ page }) => {

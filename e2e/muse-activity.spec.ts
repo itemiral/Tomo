@@ -54,3 +54,38 @@ for(const width of [1440,390])test(`Muse keeps a visible status on consecutive r
  await expect(page.locator('.muse-floating [role="status"]')).toHaveCount(0);
  await start(page,3);await finish(page,3);
 });
+
+for(const width of [1440,390])test(`closing chat during a response keeps one compact composer at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:900});await streamFixture(page);
+ const chat=page.getByRole('complementary',{name:'Chat with Muse'});
+ await expect(chat).toHaveClass(/collapsed/);
+ const resting=(await chat.boundingBox())!;
+ await start(page,0);
+ await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await expect(chat).toHaveClass(/collapsed/);
+ const stop=chat.getByRole('button',{name:'Stop response',exact:true});
+ await expect(stop).toBeVisible();
+ expect(await stop.evaluate(element=>element.parentElement?.tagName)).toBe('FORM');
+ await expect(chat.locator(':scope > button')).toHaveCount(0);
+ await expect.poll(async()=>Math.abs((await chat.boundingBox())!.height-resting.height)).toBeLessThanOrEqual(2);
+ await expect(chat.locator('.muse-chat-messages')).toBeHidden();
+ await status(page,'Working on it…');
+ const input=chat.getByRole('textbox',{name:'Message Muse'});
+ await expect(input).toBeEnabled();await input.click();
+ await expect(chat).not.toHaveClass(/collapsed/);
+ await input.fill('Keep this draft for my next message');await input.press('Enter');
+ expect(await page.evaluate(()=>(window as any).activityStreams.length)).toBe(1);
+ await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await finish(page,0,[{id:'closed-chat-result',title:'Ready',body:'Your work continued while chat was closed.'}]);
+ await expect(chat).toHaveClass(/collapsed/);
+ await expect(input).toHaveValue('Keep this draft for my next message');
+ await expect(page.locator('.muze-vector-surface [id="closed-chat-result"]')).toBeVisible();
+ await expect(chat.getByRole('button',{name:'Send to Muse',exact:true})).toBeVisible();
+ await start(page,1);
+ await page.getByRole('button',{name:'Close Muse chat',exact:true}).click();
+ await stop.click();
+ await expect(chat.getByRole('textbox',{name:'Message Muse'})).toBeEnabled();
+ await expect(page.locator('.muse-floating [role="status"]')).toHaveCount(0);
+ await expect(chat).toHaveClass(/collapsed/);
+ await expect.poll(async()=>Math.abs((await chat.boundingBox())!.height-resting.height)).toBeLessThanOrEqual(2);
+});
