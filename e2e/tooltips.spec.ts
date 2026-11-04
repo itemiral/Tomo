@@ -41,3 +41,23 @@ test('keyboard tool descriptions dismiss with Escape without changing the tool',
   await expect(hand).not.toHaveAttribute('aria-describedby');
   await expect(hand).toBeFocused();
 });
+
+
+for (const width of [320,390]) test(`signed-out phone header leaves grid controls reachable at ${width}px`, async ({page}) => {
+  await page.setViewportSize({width,height:844});
+  await page.goto('/');
+  await expect(page.getByRole('main',{name:'Muze',exact:true})).toHaveAttribute('data-ready','true');
+  await expect(page.getByRole('button',{name:'Sign in to share',exact:true})).toBeVisible();
+  const grid=page.getByRole('button',{name:'Toggle grid',exact:true});
+  await expect(grid).toHaveAttribute('aria-pressed','true');
+  const header=(await page.locator('.muze-header').boundingBox())!,control=(await grid.boundingBox())!;
+  expect(header.y+header.height).toBeLessThanOrEqual(control.y);
+  await grid.click();
+  await expect(page.locator('.muze-grid')).toHaveCount(0);
+  await page.getByRole('button',{name:'Main menu',exact:true}).click();
+  await expect(page.getByRole('menuitem',{name:'New board',exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.getByRole('main',{name:'Muze',exact:true})).toHaveAttribute('data-ready','true');
+  await expect(grid).toHaveAttribute('aria-pressed','false');
+});
