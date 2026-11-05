@@ -27,7 +27,7 @@ function profileFor(ownerId: string, value: unknown): MuseProfile | null {
 
 export function musePortraitSource(profile: MuseProfile) {
   const { iconVersion, gazeVersion } = profile.muse;
-  return iconVersion ? '/api/muse/avatar?' + (gazeVersion ? 'sheet=true&v=' + gazeVersion : 'v=' + iconVersion) + '&display=portrait' : '/muse/default-gaze-15.png?v=hybrid-15';
+  return iconVersion ? '/api/muse/avatar?' + (gazeVersion ? 'sheet=true&v=' + gazeVersion : 'v=' + iconVersion) + '&display=portrait' : '/muse/default-gaze-15.png?v=fluffyblob-v1';
 }
 
 function privateSource(source: string) {

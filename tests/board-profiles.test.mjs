@@ -163,7 +163,7 @@ test('profile DTO exposes only public fields and board-scoped avatar URLs', () =
   assert.doesNotMatch(JSON.stringify(value), /PRIVATE_|muse_avatar|soul|memory|chat/);
   for (const url of ['http://img.clerk.com/a', 'https://tracker.example/a', 'https://img.clerk.com.evil.test/a', 'https://name@img.clerk.com/a', 'https://img.clerk.com:444/a', 'data:image/png;base64,AA==']) assert.equal(clerkAvatarUrl(url), null);
   const defaults = participantData({ user_id: 'user_default', name: 'User', avatar_url: null, muse_name: 'Muse', muse_avatar_version: null, muse_sheet: false, muse_poses: 9 }, id);
-  assert.equal(defaults.museAvatarUrl, '/muse/default-gaze-15.png?v=hybrid-15'); assert.equal(defaults.musePoses, 15); assert.equal(defaults.museSheet, true);
+  assert.equal(defaults.museAvatarUrl, '/muse/default-gaze-15.png?v=fluffyblob-v1'); assert.equal(defaults.musePoses, 15); assert.equal(defaults.museSheet, true);
 });
 
 test('appearance sharing selects the active image and never a pending candidate or raw upload', async () => {

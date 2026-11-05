@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const boardId = '8b72557c-0a22-4b39-b6fc-791d75cc2207', otherBoard = '8b72557c-0a22-4b39-b6fc-791d75cc2208';
 const appearance = (board: string, user = 'owner-b') => `/api/boards/${board}/participants/${user}/avatar?v=${'a'.repeat(64)}`;
 const response = (board = boardId, name = 'Bo', museName = 'Kumo') => ({ participants: [
-  { userId: 'owner-a', name: 'Ada', avatarUrl: 'https://img.clerk.com/ada.png', museName: 'Pip', museAvatarUrl: '/muse/default-gaze-15.png?v=hybrid-15', museAvatarVersion: null, museSheet: true, musePoses: 15 },
+  { userId: 'owner-a', name: 'Ada', avatarUrl: 'https://img.clerk.com/ada.png', museName: 'Pip', museAvatarUrl: '/muse/default-gaze-15.png?v=fluffyblob-v1', museAvatarVersion: null, museSheet: true, musePoses: 15 },
   { userId: 'owner-b', name, avatarUrl: 'https://img.clerk.com/bo.png', museName, museAvatarUrl: appearance(board), museAvatarVersion: 'a'.repeat(64), museSheet: true, musePoses: 9 },
 ] });
 let compiled: Promise<{ js: string; css: string }>;
