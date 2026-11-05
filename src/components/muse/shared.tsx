@@ -16,7 +16,7 @@ export async function museRequest<T>(url: string, options?: RequestInit): Promis
 }
 export function MuseIcon({ profile, followCursor = false, pending = false, loading = false }: { profile?: MuseProfile | null; followCursor?: boolean; pending?: boolean; loading?: boolean }) {
   const custom=!!profile?.muse.iconVersion,gaze=profile?.muse.gazeVersion;
-  const src=loading?null:profile?musePortraitSource(profile):'/muse/default-gaze-15.png?v=hybrid-15';
+  const src=loading?null:profile?musePortraitSource(profile):'/muse/default-gaze-15.png?v=fluffyblob-v1';
   return <MuseAvatarImage src={src} poses={custom?9:15} sheet={!custom||!!gaze} follow={followCursor} pending={pending} cacheOwner={profile&&musePreviewOwnerMatches(profile.ownerId)?profile.ownerId:undefined}/>;
 }
 export function MuseMarkdown({ text }: { text: string }) {

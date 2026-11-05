@@ -8,7 +8,7 @@ function gate() { let release!: () => void; const promise = new Promise<void>(re
 const customSource = (owner: string) => '/api/muse/avatar?sheet=true&v=sheet-' + owner + '&display=portrait';
 const profile = (owner: string) => ({ ownerId: owner, ownerName: owner, muse: { id: owner + '-muse', name: owner === 'owner-a' ? 'Kumo' : 'Pip', iconVersion: 'icon-' + owner, gazeVersion: 'sheet-' + owner } });
 const peerSource = '/api/boards/' + boardId + '/participants/owner-b/avatar?v=' + 'a'.repeat(64);
-const peerProfile = (custom = true) => ({ participants: [{ userId: 'owner-b', name: 'Bo', avatarUrl: null, museName: custom ? 'Kumo' : 'Muse', museAvatarUrl: custom ? peerSource : '/muse/default-gaze-15.png?v=hybrid-15', museAvatarVersion: custom ? 'a'.repeat(64) : null, musePoses: custom ? 9 : 15, museSheet: true }] });
+const peerProfile = (custom = true) => ({ participants: [{ userId: 'owner-b', name: 'Bo', avatarUrl: null, museName: custom ? 'Kumo' : 'Muse', museAvatarUrl: custom ? peerSource : '/muse/default-gaze-15.png?v=fluffyblob-v1', museAvatarVersion: custom ? 'a'.repeat(64) : null, musePoses: custom ? 9 : 15, museSheet: true }] });
 let compiled: Promise<{ js: string; css: string }>;
 function bundle() {
   return compiled ||= build({ stdin: { resolveDir: resolve('.'), loader: 'tsx', contents: `

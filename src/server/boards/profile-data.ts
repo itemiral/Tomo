@@ -19,7 +19,7 @@ export function participantData(row: ParticipantRow, boardId: string) {
   return {
     userId: row.user_id, name: profileName(row.name, 'Guest'), avatarUrl: clerkAvatarUrl(row.avatar_url),
     museName: profileName(row.muse_name, 'Muse'), museAvatarVersion: row.muse_avatar_version,
-    museAvatarUrl: row.muse_avatar_version ? `/api/boards/${encodeURIComponent(boardId)}/participants/${encodeURIComponent(row.user_id)}/avatar?v=${row.muse_avatar_version}` : '/muse/default-gaze-15.png?v=hybrid-15',
+    museAvatarUrl: row.muse_avatar_version ? `/api/boards/${encodeURIComponent(boardId)}/participants/${encodeURIComponent(row.user_id)}/avatar?v=${row.muse_avatar_version}` : '/muse/default-gaze-15.png?v=fluffyblob-v1',
     museSheet: row.muse_avatar_version ? row.muse_sheet : true, musePoses: row.muse_avatar_version ? row.muse_poses : 15,
   };
 }
